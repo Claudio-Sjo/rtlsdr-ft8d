@@ -23,13 +23,6 @@
 #include <unistd.h>
 
 
-#ifndef bool
-    typedef uint32_t bool;
-    #define true  1
-    #define false 0
-#endif
-
-
 /* Sampling definition for RTL devices & FT8 protocol */
 #define SIGNAL_LENGHT       15
 #define SIGNAL_SAMPLE_RATE  3200
