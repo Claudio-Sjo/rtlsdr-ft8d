@@ -44,9 +44,9 @@
 #include "./ft8_lib/ft8/encode.h"
 
 #include "pskreporter.hpp"
+#include "ft8_ncurses.h"
 
 void printSpots(uint32_t n_results);
-
 
 /* Thread for decoding */
 static struct decoder_thread decThread;
@@ -55,9 +55,8 @@ static struct decoder_thread decThread;
 pthread_t spottingThread;
 
 /* Thread for RX (blocking function used) & RTL struct */
-static pthread_t     rxThread;
+static pthread_t rxThread;
 static rtlsdr_dev_t *rtl_device = NULL;
-
 
 /* FFTW pointers & stuff */
 static fftwf_plan fft_plan;
@@ -65,33 +64,30 @@ static fftwf_complex *fft_in, *fft_out;
 static FILE *fp_fftw_wisdom_file;
 static float *hann;
 
-
 /* Global declaration for states & options, shared with other external objects */
 
-struct receiver_state   rx_state;
+struct receiver_state rx_state;
 struct receiver_options rx_options;
-struct decoder_options  dec_options;
-struct decoder_results  dec_results[50];
+struct decoder_options dec_options;
+struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
 int dec_results_queue_index = 0;
 
-
 /* Could be nice to update this one with the CI */
 const char rtlsdr_ft8d_version[] = "0.3.6";
-const char pskreporter_app_version[]  = "rtlsdr-ft8d_v0.3.6";
-
+const char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.6";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
     int8_t *sigIn = (int8_t *)samples;
 
     /* CIC buffers/vars */
-    static int32_t  Ix1 = 0, Ix2 = 0,
-                    Qx1 = 0, Qx2 = 0;
-    static int32_t  Iy1 = 0, It1y = 0, It1z = 0,
-                    Qy1 = 0, Qt1y = 0, Qt1z = 0;
-    static int32_t  Iy2 = 0, It2y = 0, It2z = 0,
-                    Qy2 = 0, Qt2y = 0, Qt2z = 0;
+    static int32_t Ix1 = 0, Ix2 = 0,
+                   Qx1 = 0, Qx2 = 0;
+    static int32_t Iy1 = 0, It1y = 0, It1z = 0,
+                   Qy1 = 0, Qt1y = 0, Qt1z = 0;
+    static int32_t Iy2 = 0, It2y = 0, It2z = 0,
+                   Qy2 = 0, Qt2y = 0, Qt2z = 0;
     static uint32_t decimationIndex = 0;
 
     /* FIR compensation filter coefs
@@ -100,23 +96,22 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
      */
 
     /* Coefs with R=750, M=1, N=2, F0=0.92, L=54 */
-    const static float zCoef[FIR_TAPS+1] = {
-        -0.0025719973,  0.0010118403,  0.0009110571, -0.0034940765,
-         0.0069713409, -0.0114242790,  0.0167023466, -0.0223683056,
-         0.0276808966, -0.0316243672,  0.0329894230, -0.0305042011,
-         0.0230074504, -0.0096499429, -0.0098950502,  0.0352349632,
-        -0.0650990428,  0.0972406918, -0.1284211497,  0.1544893973,
-        -0.1705667465,  0.1713383321, -0.1514501610,  0.1060148823,
-        -0.0312560926, -0.0745846391,  0.2096088743, -0.3638689868,
-         0.5000000000,
-        -0.3638689868,  0.2096088743, -0.0745846391, -0.0312560926,
-         0.1060148823, -0.1514501610,  0.1713383321, -0.1705667465,
-         0.1544893973, -0.1284211497,  0.0972406918, -0.0650990428,
-         0.0352349632, -0.0098950502, -0.0096499429,  0.0230074504,
-        -0.0305042011,  0.0329894230, -0.0316243672,  0.0276808966,
-        -0.0223683056,  0.0167023466, -0.0114242790,  0.0069713409,
-        -0.0034940765,  0.0009110571,  0.0010118403, -0.0025719973
-    };
+    const static float zCoef[FIR_TAPS + 1] = {
+        -0.0025719973, 0.0010118403, 0.0009110571, -0.0034940765,
+        0.0069713409, -0.0114242790, 0.0167023466, -0.0223683056,
+        0.0276808966, -0.0316243672, 0.0329894230, -0.0305042011,
+        0.0230074504, -0.0096499429, -0.0098950502, 0.0352349632,
+        -0.0650990428, 0.0972406918, -0.1284211497, 0.1544893973,
+        -0.1705667465, 0.1713383321, -0.1514501610, 0.1060148823,
+        -0.0312560926, -0.0745846391, 0.2096088743, -0.3638689868,
+        0.5000000000,
+        -0.3638689868, 0.2096088743, -0.0745846391, -0.0312560926,
+        0.1060148823, -0.1514501610, 0.1713383321, -0.1705667465,
+        0.1544893973, -0.1284211497, 0.0972406918, -0.0650990428,
+        0.0352349632, -0.0098950502, -0.0096499429, 0.0230074504,
+        -0.0305042011, 0.0329894230, -0.0316243672, 0.0276808966,
+        -0.0223683056, 0.0167023466, -0.0114242790, 0.0069713409,
+        -0.0034940765, 0.0009110571, 0.0010118403, -0.0025719973};
 
     /* FIR compensation filter buffers */
     static float firI[FIR_TAPS] = {0.0},
@@ -136,16 +131,16 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
     */
     int8_t tmp;
     for (uint32_t i = 0; i < samples_count; i += 8) {
-        sigIn[i  ] ^=  0x80;  // Unsigned to signed conversion using
-        sigIn[i+1] ^=  0x80;  //   XOR as a binary mask to flip the first bit
-        tmp         =  (sigIn[i+3] ^ 0x80);  // CHECK -127 alt. speed
-        sigIn[i+3]  =  (sigIn[i+2] ^ 0x80);
-        sigIn[i+2]  = -tmp;
-        sigIn[i+4]  = -(sigIn[i+4] ^ 0x80);
-        sigIn[i+5]  = -(sigIn[i+5] ^ 0x80);
-        tmp         =  (sigIn[i+6] ^ 0x80);
-        sigIn[i+6]  =  (sigIn[i+7] ^ 0x80);
-        sigIn[i+7]  = -tmp;
+        sigIn[i] ^= 0x80;             // Unsigned to signed conversion using
+        sigIn[i + 1] ^= 0x80;         //   XOR as a binary mask to flip the first bit
+        tmp = (sigIn[i + 3] ^ 0x80);  // CHECK -127 alt. speed
+        sigIn[i + 3] = (sigIn[i + 2] ^ 0x80);
+        sigIn[i + 2] = -tmp;
+        sigIn[i + 4] = -(sigIn[i + 4] ^ 0x80);
+        sigIn[i + 5] = -(sigIn[i + 5] ^ 0x80);
+        tmp = (sigIn[i + 6] ^ 0x80);
+        sigIn[i + 6] = (sigIn[i + 7] ^ 0x80);
+        sigIn[i + 7] = -tmp;
     }
 
     /* CIC decimator (N=2)
@@ -169,18 +164,18 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
         decimationIndex = 0;
 
         /* 1st Comb */
-        Iy1  = Ix2 - It1z;
+        Iy1 = Ix2 - It1z;
         It1z = It1y;
         It1y = Ix2;
-        Qy1  = Qx2 - Qt1z;
+        Qy1 = Qx2 - Qt1z;
         Qt1z = Qt1y;
         Qt1y = Qx2;
 
         /* 2nd Comd */
-        Iy2  = Iy1 - It2z;
+        Iy2 = Iy1 - It2z;
         It2z = It2y;
         It2y = Iy1;
-        Qy2  = Qy1 - Qt2z;
+        Qy2 = Qy1 - Qt2z;
         Qt2z = Qt2y;
         Qt2y = Qy1;
 
@@ -190,15 +185,15 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
         for (uint32_t j = 0; j < FIR_TAPS; j++) {
             Isum += firI[j] * zCoef[j];
             Qsum += firQ[j] * zCoef[j];
-            if (j < FIR_TAPS-1) {
+            if (j < FIR_TAPS - 1) {
                 firI[j] = firI[j + 1];
                 firQ[j] = firQ[j + 1];
             }
         }
-        firI[FIR_TAPS-1] = (float)Iy2;
-        firQ[FIR_TAPS-1] = (float)Qy2;
-        Isum += firI[FIR_TAPS-1] * zCoef[FIR_TAPS];
-        Qsum += firQ[FIR_TAPS-1] * zCoef[FIR_TAPS];
+        firI[FIR_TAPS - 1] = (float)Iy2;
+        firQ[FIR_TAPS - 1] = (float)Qy2;
+        Isum += firI[FIR_TAPS - 1] * zCoef[FIR_TAPS];
+        Qsum += firQ[FIR_TAPS - 1] * zCoef[FIR_TAPS];
 
         /* Save the result in the buffer */
         uint32_t idx = rx_state.bufferIndex;
@@ -210,13 +205,11 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
     }
 }
 
-
 static void sigint_callback_handler(int signum) {
     fprintf(stderr, "Signal caught %d, exiting!\n", signum);
     rx_state.exit_flag = true;
     rtlsdr_cancel_async(rtl_device);
 }
-
 
 /* Thread used for this RX blocking function */
 static void *rtlsdr_rx(void *arg) {
@@ -224,7 +217,6 @@ static void *rtlsdr_rx(void *arg) {
     rtlsdr_cancel_async(rtl_device);
     return NULL;
 }
-
 
 /* Thread used for the decoder */
 static void *decoder(void *arg) {
@@ -236,14 +228,14 @@ static void *decoder(void *arg) {
         LOG(LOG_DEBUG, "Decoder thread -- Got a signal!\n");
 
         if (rx_state.exit_flag)
-            break;  /* Abort case, final sig */
+            break; /* Abort case, final sig */
 
         /* Select the previous transmission / other buffer */
         uint32_t prevBuffer = (rx_state.bufferIndex + 1) % 2;
 
-        if (rx_state.iqIndex[prevBuffer] < ( (SIGNAL_LENGHT - 3) * SIGNAL_SAMPLE_RATE ) ) {
+        if (rx_state.iqIndex[prevBuffer] < ((SIGNAL_LENGHT - 3) * SIGNAL_SAMPLE_RATE)) {
             LOG(LOG_DEBUG, "Decoder thread -- Signal too short, skipping!\n");
-            continue;  /* Partial buffer during the first RX, skip it! */
+            continue; /* Partial buffer during the first RX, skip it! */
         } else {
             rx_options.nloop++; /* Decoding this signal, count it! */
         }
@@ -275,9 +267,9 @@ static void *decoder(void *arg) {
            with 1 second margin added, just to be sure to be on 15 alignment
         */
         time_t unixtime;
-        time ( &unixtime );
+        time(&unixtime);
         unixtime = unixtime - 15 + 1;
-        rx_state.gtm = gmtime( &unixtime );
+        rx_state.gtm = gmtime(&unixtime);
 
         /* Search & decode the signal */
         ft8_subsystem(rx_state.iSamples[prevBuffer],
@@ -293,32 +285,30 @@ static void *decoder(void *arg) {
     return NULL;
 }
 
-
 /* Double buffer management */
 void initSampleStorage() {
     rx_state.bufferIndex = 0;
-    rx_state.iqIndex[0]  = 0;
-    rx_state.iqIndex[1]  = 0;
-    rx_state.exit_flag   = false;
+    rx_state.iqIndex[0] = 0;
+    rx_state.iqIndex[1] = 0;
+    rx_state.exit_flag = false;
 }
-
 
 /* Default options for the receiver */
 void initrx_options() {
-    rx_options.gain           = 290;
-    rx_options.autogain       = 0;
-    rx_options.ppm            = 0;
-    rx_options.shift          = 0;
+    rx_options.gain = 290;
+    rx_options.autogain = 0;
+    rx_options.ppm = 0;
+    rx_options.shift = 0;
     rx_options.directsampling = 0;
-    rx_options.maxloop        = 0;
-    rx_options.nloop          = 0;
-    rx_options.device         = 0;
-    rx_options.selftest       = false;
-    rx_options.writefile      = false;
-    rx_options.readfile       = false;
-    rx_options.noreport       = false;
+    rx_options.maxloop = 0;
+    rx_options.nloop = 0;
+    rx_options.device = 0;
+    rx_options.selftest = false;
+    rx_options.writefile = false;
+    rx_options.readfile = false;
+    rx_options.noreport = false;
+    rx_options.qso = false;
 }
-
 
 void initFFTW() {
     /* Recover existing FFTW optimisations */
@@ -328,7 +318,7 @@ void initFFTW() {
     }
 
     /* Allocate FFT buffers */
-    fft_in  = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * NFFT);
+    fft_in = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * NFFT);
     fft_out = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * NFFT);
 
     /* FFTW internal plan */
@@ -343,26 +333,23 @@ void initFFTW() {
     }
 }
 
-
 void freeFFTW() {
-  fftwf_free(fft_in);
-  fftwf_free(fft_out);
+    fftwf_free(fft_in);
+    fftwf_free(fft_out);
 
-  if ((fp_fftw_wisdom_file = fopen("fftw_wisdom.dat", "w"))) {
-      fftwf_export_wisdom_to_file(fp_fftw_wisdom_file);
-      fclose(fp_fftw_wisdom_file);
-  }
-  fftwf_destroy_plan(fft_plan);
+    if ((fp_fftw_wisdom_file = fopen("fftw_wisdom.dat", "w"))) {
+        fftwf_export_wisdom_to_file(fp_fftw_wisdom_file);
+        fclose(fp_fftw_wisdom_file);
+    }
+    fftwf_destroy_plan(fft_plan);
 }
-
 
 inline uint16_t SwapEndian16(uint16_t val) {
-    return (val<<8) | (val>>8);
+    return (val << 8) | (val >> 8);
 }
 
-
 inline uint32_t SwapEndian32(uint32_t val) {
-    return (val<<24) | ((val<<8) & 0x00ff0000) | ((val>>8) & 0x0000ff00) | (val>>24);
+    return (val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24);
 }
 
 PskReporter *reporter;
@@ -373,19 +360,19 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *pskUploader(void *vargp) {
     while (1) {
-      if (dec_results_queue.size() > 0) {
-          sleep(60);
-          pthread_mutex_lock(&lock);
-          for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
-              struct decoder_results dr = dec_results_queue.front();
-              reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
-              dec_results_queue.erase(dec_results_queue.begin());
-          }
-          pthread_mutex_unlock(&lock);
-          reporter->send();
-      } else {
-          sleep(60);
-      }
+        if (dec_results_queue.size() > 0) {
+            sleep(60);
+            pthread_mutex_lock(&lock);
+            for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
+                struct decoder_results dr = dec_results_queue.front();
+                reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
+                dec_results_queue.erase(dec_results_queue.begin());
+            }
+            pthread_mutex_unlock(&lock);
+            reporter->send();
+        } else {
+            sleep(60);
+        }
     }
 }
 
@@ -435,8 +422,8 @@ void webClusterSpots(uint32_t n_results) {
 
     CURL *curl;
     CURLcode res;
-    struct curl_httppost* post = NULL;
-    struct curl_httppost* last = NULL;
+    struct curl_httppost *post = NULL;
+    struct curl_httppost *last = NULL;
 
     char myCall[16];
     char dxCall[12];
@@ -470,29 +457,34 @@ void webClusterSpots(uint32_t n_results) {
     }
 }
 
-
 void printSpots(uint32_t n_results) {
+char mystring[255];
+
     if (n_results == 0) {
-        printf("No spot %04d-%02d-%02d %02d:%02dz\n",
+        sprintf(mystring,"No spot %04d-%02d-%02d %02d:%02dz\n",
                rx_state.gtm->tm_year + 1900,
                rx_state.gtm->tm_mon + 1,
                rx_state.gtm->tm_mday,
                rx_state.gtm->tm_hour,
                rx_state.gtm->tm_min);
+        n_printf(rx_options.qso,mystring);
 
         return;
     }
 
-    printf("  Score     Freq       Call    Loc\n");
+    sprintf(mystring,"  Score     Freq       Call    Loc\n");
+    n_printf(rx_options.qso,mystring);
+
     for (uint32_t i = 0; i < n_results; i++) {
-        printf("     %2d %8d %10s %6s\n",
+        sprintf(mystring,"     %2d %8d %10s %6s\n",
                dec_results[i].snr,
                dec_results[i].freq + dec_options.freq,
                dec_results[i].call,
                dec_results[i].loc);
+        n_printf(rx_options.qso,mystring);
+
     }
 }
-
 
 void saveSample(float *iSamples, float *qSamples) {
     if (rx_options.writefile == true) {
@@ -514,7 +506,6 @@ void saveSample(float *iSamples, float *qSamples) {
         writeRawIQfile(iSamples, qSamples, filename);
     }
 }
-
 
 double atofs(char *s) {
     /* standard suffixes */
@@ -543,7 +534,6 @@ double atofs(char *s) {
     return atof(s);
 }
 
-
 int32_t parse_u64(char *s, uint64_t *const value) {
     uint_fast8_t base = 10;
     char *s_end;
@@ -571,7 +561,6 @@ int32_t parse_u64(char *s, uint64_t *const value) {
     }
 }
 
-
 int32_t readRawIQfile(float *iSamples, float *qSamples, char *filename) {
     float filebuffer[2 * SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
     FILE *fd = fopen(filename, "rb");
@@ -587,7 +576,7 @@ int32_t readRawIQfile(float *iSamples, float *qSamples, char *filename) {
 
     /* Convert the interleaved buffer into 2 buffers */
     for (int32_t i = 0; i < recsize; i++) {
-        iSamples[i] =  filebuffer[2 * i];
+        iSamples[i] = filebuffer[2 * i];
         qSamples[i] = -filebuffer[2 * i + 1];  // neg, convention used by wsprsim
     }
 
@@ -603,14 +592,13 @@ int32_t readRawIQfile(float *iSamples, float *qSamples, char *filename) {
             maxSig = absQ;
     }
     maxSig = 0.5 / maxSig;
-    for (int i = 0; i <recsize; i++) {
+    for (int i = 0; i < recsize; i++) {
         iSamples[i] *= maxSig;
         qSamples[i] *= maxSig;
     }
 
     return recsize;
 }
-
 
 int32_t writeRawIQfile(float *iSamples, float *qSamples, char *filename) {
     float filebuffer[2 * SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
@@ -622,7 +610,7 @@ int32_t writeRawIQfile(float *iSamples, float *qSamples, char *filename) {
     }
 
     for (int32_t i = 0; i < SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE; i++) {
-        filebuffer[2 * i]     =  iSamples[i];
+        filebuffer[2 * i] = iSamples[i];
         filebuffer[2 * i + 1] = -qSamples[i];  // neg, convention used by wsprsim
     }
 
@@ -636,14 +624,13 @@ int32_t writeRawIQfile(float *iSamples, float *qSamples, char *filename) {
     return SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
 }
 
-
 int32_t readC2file(float *iSamples, float *qSamples, char *filename) {
     float filebuffer[2 * SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
     FILE *fd = fopen(filename, "rb");
     int32_t nread;
     double frequency;
-    int    type;
-    char   name[15];
+    int type;
+    char name[15];
 
     if (fd == NULL) {
         fprintf(stderr, "Cannot open data file...\n");
@@ -662,7 +649,7 @@ int32_t readC2file(float *iSamples, float *qSamples, char *filename) {
 
     /* Convert the interleaved buffer into 2 buffers */
     for (int32_t i = 0; i < recsize; i++) {
-        iSamples[i] =  filebuffer[2 * i];
+        iSamples[i] = filebuffer[2 * i];
         qSamples[i] = -filebuffer[2 * i + 1];  // neg, convention used by wsprsim
     }
 
@@ -678,7 +665,7 @@ int32_t readC2file(float *iSamples, float *qSamples, char *filename) {
             maxSig = absQ;
     }
     maxSig = 0.5 / maxSig;
-    for (int i = 0; i <recsize; i++) {
+    for (int i = 0; i < recsize; i++) {
         iSamples[i] *= maxSig;
         qSamples[i] *= maxSig;
     }
@@ -686,16 +673,15 @@ int32_t readC2file(float *iSamples, float *qSamples, char *filename) {
     return recsize;
 }
 
-
 void decodeRecordedFile(char *filename) {
     static float iSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
     static float qSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
     static uint32_t samples_len;
     int32_t n_results = 0;
 
-    if (strcmp(&filename[strlen(filename)-3], ".iq") == 0) {
+    if (strcmp(&filename[strlen(filename) - 3], ".iq") == 0) {
         samples_len = readRawIQfile(iSamples, qSamples, filename);
-    } else if (strcmp(&filename[strlen(filename)-3], ".c2") == 0) {
+    } else if (strcmp(&filename[strlen(filename) - 3], ".c2") == 0) {
         samples_len = readC2file(iSamples, qSamples, filename);
     } else {
         fprintf(stderr, "Not a valid extension!! (only .iq & .c2 files)\n");
@@ -709,14 +695,13 @@ void decodeRecordedFile(char *filename) {
         ft8_subsystem(iSamples, qSamples, samples_len, dec_results, &n_results);
 
         time_t unixtime;
-        time ( &unixtime );
+        time(&unixtime);
         unixtime = unixtime - 120 + 1;
-        rx_state.gtm = gmtime( &unixtime );
+        rx_state.gtm = gmtime(&unixtime);
 
         printSpots(n_results);
     }
 }
-
 
 float whiteGaussianNoise(float factor) {
     static double V1, V2, U1, U2, S, X;
@@ -729,7 +714,7 @@ float whiteGaussianNoise(float factor) {
             V1 = 2 * U1 - 1;
             V2 = 2 * U2 - 1;
             S = V1 * V1 + V2 * V2;
-        } while(S >= 1 || S == 0);
+        } while (S >= 1 || S == 0);
 
         X = V1 * sqrt(-2 * log(S) / S);
     } else {
@@ -740,12 +725,13 @@ float whiteGaussianNoise(float factor) {
     return (float)X * factor;
 }
 
-
 int32_t decoderSelfTest() {
     static float iSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
     static float qSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
     static uint32_t samples_len = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
     int32_t n_results = 0;
+
+    char mystring[255];
 
     /* Ref test message
      * Message : "CQ K1JT FN20QI"
@@ -755,8 +741,9 @@ int32_t decoderSelfTest() {
     const char message[] = "CQ K1JT FN20QI";
     uint8_t packed[FTX_LDPC_K_BYTES];
 
-    if (pack77(message, packed) < 0){
-        printf("Cannot parse message!\n");
+    if (pack77(message, packed) < 0) {
+        sprintf(mystring,"Cannot parse message!\n");
+        n_printf(rx_options.qso,mystring);
         return 0;
     }
 
@@ -764,19 +751,18 @@ int32_t decoderSelfTest() {
     uint8_t tones[FT8_NN];
     ft8_encode(packed, tones);
 
-
     // Encoding, simple FSK modulation
-    float  f0  = 50.0;
-    float  t0  = 0.0;  // Caution!! Possible buffer overflow with the index calculation (no user input here!)
-    float  amp = 0.5;
-    float  wgn = 0.02;
+    float f0 = 50.0;
+    float t0 = 0.0;  // Caution!! Possible buffer overflow with the index calculation (no user input here!)
+    float amp = 0.5;
+    float wgn = 0.02;
     double phi = 0.0;
-    double df  = 3200.0 / 512.0; // EVAL : #define SIGNAL_SAMPLE_RATE as int or float ??
-    double dt  = 1 / 3200.0;
+    double df = 3200.0 / 512.0;  // EVAL : #define SIGNAL_SAMPLE_RATE as int or float ??
+    double dt = 1 / 3200.0;
 
     // Add signal
     for (int i = 0; i < FT8_NN; i++) {
-        double dphi = 2.0 * M_PI * dt * (f0 + ( (double)tones[i]-3.5) * df);
+        double dphi = 2.0 * M_PI * dt * (f0 + ((double)tones[i] - 3.5) * df);
         for (int j = 0; j < 512; j++) {
             int index = t0 / dt + 512 * i + j;
             iSamples[index] = amp * cos(phi) + whiteGaussianNoise(wgn);
@@ -795,13 +781,12 @@ int32_t decoderSelfTest() {
 
     /* Simple consistency check */
     if (strcmp(dec_results[0].call, "K1JT") &&
-        strcmp(dec_results[0].loc,  "FN20")) {
+        strcmp(dec_results[0].loc, "FN20")) {
         return 0;
     } else {
         return 1;
     }
 }
-
 
 void usage(FILE *stream, int32_t status) {
     fprintf(stream,
@@ -818,6 +803,7 @@ void usage(FILE *stream, int32_t status) {
             "\t-a auto gain (off by default, no parameter)\n"
             "\t-o frequency offset (default: 0)\n"
             "\t-p crystal correction factor (ppm) (default: 0)\n"
+            "\t-q QSO interactive mode (default: false)\n"
             "\t-u upconverter (default: 0, example: 125M)\n"
             "\t-d direct dampling [0,1,2] (default: 0, 1 for I input, 2 for Q input)\n"
             "\t-n max iterations (default: 0 = infinite loop)\n"
@@ -836,20 +822,18 @@ void usage(FILE *stream, int32_t status) {
     exit(status);
 }
 
-
 int main(int argc, char **argv) {
     uint32_t opt;
-    const char    *short_options = "f:c:l:g:ao:p:u:d:n:i:xtw:r:";
-    int32_t  option_index = 0;
+    const char *short_options = "f:c:l:g:ao:p:u:d:n:i:qxtw:r:";
+    int32_t option_index = 0;
     struct option long_options[] = {
-        {"help",    no_argument, 0, 0 },
-        {"version", no_argument, 0, 0 },
-        {0, 0, 0, 0 }
-    };
+        {"help", no_argument, 0, 0},
+        {"version", no_argument, 0, 0},
+        {0, 0, 0, 0}};
 
     int32_t rtl_result;
     int32_t rtl_count;
-    char    rtl_vendor[256], rtl_product[256], rtl_serial[256];
+    char rtl_vendor[256], rtl_product[256], rtl_serial[256];
 
     initrx_options();
 
@@ -857,7 +841,7 @@ int main(int argc, char **argv) {
     initFFTW();
 
     /* Stop condition setup */
-    rx_state.exit_flag   = false;
+    rx_state.exit_flag = false;
     uint32_t nLoop = 0;
 
     if (argc <= 1)
@@ -962,6 +946,9 @@ int main(int argc, char **argv) {
             case 'n':  // Stop after n iterations
                 rx_options.maxloop = (uint32_t)atofs(optarg);
                 break;
+            case 'q':  // Set QSO mode)
+                rx_options.qso = true;
+                break;
             case 'i':  // Select the device to use
                 rx_options.device = (uint32_t)atofs(optarg);
                 break;
@@ -980,29 +967,38 @@ int main(int argc, char **argv) {
                 rx_options.filename = optarg;
                 break;
             default:
+                printf("Offending option : ");
+                putchar(opt);
                 usage(stderr, EXIT_FAILURE);
                 break;
         }
+        printf("Option : ");
+        putchar(opt);
     }
 
-    if (rx_options.dialfreq == 0) {
-        fprintf(stderr, "Please specify a dial frequency.\n");
-        fprintf(stderr, " --help for usage...\n");
-        return EXIT_FAILURE;
+    if (rx_options.qso == true) {
+        init_ncurses();
     }
 
-    if (dec_options.rcall[0] == 0) {
-        fprintf(stderr, "Please specify your callsign.\n");
-        fprintf(stderr, " --help for usage...\n");
-        return EXIT_FAILURE;
-    }
+    if (rx_options.selftest == false) {
+        if (rx_options.dialfreq == 0) {
+            fprintf(stderr, "Please specify a dial frequency.\n");
+            fprintf(stderr, " --help for usage...\n");
+            return EXIT_FAILURE;
+        }
 
-    if (dec_options.rloc[0] == 0) {
-        fprintf(stderr, "Please specify your locator.\n");
-        fprintf(stderr, " --help for usage...\n");
-        return EXIT_FAILURE;
-    }
+        if (dec_options.rcall[0] == 0) {
+            fprintf(stderr, "Please specify your callsign.\n");
+            fprintf(stderr, " --help for usage...\n");
+            return EXIT_FAILURE;
+        }
 
+        if (dec_options.rloc[0] == 0) {
+            fprintf(stderr, "Please specify your locator.\n");
+            fprintf(stderr, " --help for usage...\n");
+            return EXIT_FAILURE;
+        }
+    }
     /* Calcule shift offset */
     rx_options.realfreq = rx_options.dialfreq + rx_options.shift + rx_options.upconverter;
 
@@ -1010,12 +1006,14 @@ int main(int argc, char **argv) {
     dec_options.freq = rx_options.dialfreq;
 
     if (rx_options.selftest == true) {
+        char mystring[255];
         if (decoderSelfTest()) {
-            fprintf(stdout, "Self-test SUCCESS!\n");
+            sprintf(mystring,"Self-test SUCCESS!\n");
+            n_printf(rx_options.qso,mystring);
             return EXIT_SUCCESS;
-        }
-        else {
-            fprintf(stderr, "Self-test FAILED!\n");
+        } else {
+            sprintf(mystring,"Self-test FAILED!\n");
+            n_printf(rx_options.qso,mystring);
             return EXIT_FAILURE;
         }
     }
@@ -1031,10 +1029,10 @@ int main(int argc, char **argv) {
     }
 
     /* If something goes wrong... */
-    signal(SIGINT,  &sigint_callback_handler);
+    signal(SIGINT, &sigint_callback_handler);
     signal(SIGTERM, &sigint_callback_handler);
-    signal(SIGILL,  &sigint_callback_handler);
-    signal(SIGFPE,  &sigint_callback_handler);
+    signal(SIGILL, &sigint_callback_handler);
+    signal(SIGFPE, &sigint_callback_handler);
     signal(SIGSEGV, &sigint_callback_handler);
     signal(SIGABRT, &sigint_callback_handler);
 
@@ -1120,13 +1118,11 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-
     /* Time alignment & info */
     struct timeval lTime;
     time_t rawtime;
-    time ( &rawtime );
+    time(&rawtime);
     struct tm *gtm = gmtime(&rawtime);
-
 
     /* Print used parameter */
     printf("\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
@@ -1141,14 +1137,12 @@ int main(int argc, char **argv) {
     else
         printf("  Gain         : %d dB\n", rx_options.gain / 10);
 
-
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
-    uint32_t sec   = lTime.tv_sec % 15;
-    uint32_t usec  = sec * 1000000 + lTime.tv_usec;
+    uint32_t sec = lTime.tv_sec % 15;
+    uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = 15000000 - usec;
     printf("Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
-
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
@@ -1171,10 +1165,10 @@ int main(int argc, char **argv) {
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
         /* Wait for time Sync on 15 secs */
         gettimeofday(&lTime, NULL);
-        sec   = lTime.tv_sec % 15;
-        usec  = sec * 1000000 + lTime.tv_usec;
+        sec = lTime.tv_sec % 15;
+        usec = sec * 1000000 + lTime.tv_usec;
         uwait = 15000000 - usec;
-        LOG(LOG_DEBUG, "Main thread -- Waiting %d seconds\n", uwait/1000000);
+        LOG(LOG_DEBUG, "Main thread -- Waiting %d seconds\n", uwait / 1000000);
         usleep(uwait);
         LOG(LOG_DEBUG, "Main thread -- Sending a GO to the decoder thread\n");
 
@@ -1206,9 +1200,12 @@ int main(int argc, char **argv) {
 
     printf("Bye!\n");
 
+    if (rx_options.qso == true) {
+        close_ncurses();
+    }
+
     return EXIT_SUCCESS;
 }
-
 
 /*
  * FT8 Protocol doc high level
@@ -1221,7 +1218,6 @@ void ft8_subsystem(float *iSamples,
                    uint32_t samples_len,
                    struct decoder_results *decodes,
                    int32_t *n_results) {
-
     // UPDATE: adjust with samples_len !!
 
     /* Compute FFT over the whole signal and store it */
@@ -1265,19 +1261,18 @@ void ft8_subsystem(float *iSamples,
             }
         }
     }
-    //fprintf(stderr, "Max magnitude: %.1f dB\n", max_mag);
+    // fprintf(stderr, "Max magnitude: %.1f dB\n", max_mag);
 
     /* Find top candidates by Costas sync score and localize them in time and frequency */
     candidate_t candidate_list[K_MAX_CANDIDATES];
     waterfall_t power = {
-        .num_blocks   = NUM_BLOCKS,
-        .num_bins     = NUM_BIN,
-        .time_osr     = K_TIME_OSR,
-        .freq_osr     = K_FREQ_OSR,
-        .mag          = mag_power,
+        .num_blocks = NUM_BLOCKS,
+        .num_bins = NUM_BIN,
+        .time_osr = K_TIME_OSR,
+        .freq_osr = K_FREQ_OSR,
+        .mag = mag_power,
         .block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN),
-        .protocol     = PROTO_FT8
-    };
+        .protocol = PROTO_FT8};
 
     int num_candidates = ft8_find_sync(&power, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
 
@@ -1291,7 +1286,7 @@ void ft8_subsystem(float *iSamples,
         decoded_hashtable[i] = NULL;
     }
 
-    //fprintf(stdout, "SNR  DT   Freq ~ Message\n");
+    // fprintf(stdout, "SNR  DT   Freq ~ Message\n");
 
     // Go over candidates and attempt to decode messages
     for (int idx = 0; idx < num_candidates; ++idx) {
@@ -1307,11 +1302,11 @@ void ft8_subsystem(float *iSamples,
         decode_status_t status;
         if (!ft8_decode(&power, cand, &message, K_LDPC_ITERS, &status)) {
             if (status.ldpc_errors > 0) {
-                //fprintf(stderr, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // fprintf(stderr, "LDPC decode: %d errors\n", status.ldpc_errors);
             } else if (status.crc_calculated != status.crc_extracted) {
-                //fprintf(stderr, "CRC mismatch!\n");
+                // fprintf(stderr, "CRC mismatch!\n");
             } else if (status.unpack_status != 0) {
-                //fprintf(stderr, "Error while unpacking!\n");
+                // fprintf(stderr, "Error while unpacking!\n");
             }
             continue;
         }
@@ -1321,14 +1316,14 @@ void ft8_subsystem(float *iSamples,
         bool found_duplicate = false;
         do {
             if (decoded_hashtable[idx_hash] == NULL) {
-                //fprintf(stderr, "Found an empty slot\n");
+                // fprintf(stderr, "Found an empty slot\n");
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == strcmp(decoded_hashtable[idx_hash]->text, message.text))) {
-                //fprintf(stderr, "Found a duplicate [%s]\n", message.text);
+                // fprintf(stderr, "Found a duplicate [%s]\n", message.text);
                 found_duplicate = true;
             } else {
-                //fprintf(stderr, "Hash table clash!\n");
-                // Move on to check the next entry in hash table
+                // fprintf(stderr, "Hash table clash!\n");
+                //  Move on to check the next entry in hash table
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
         } while (!found_empty_slot && !found_duplicate);
@@ -1342,11 +1337,11 @@ void ft8_subsystem(float *iSamples,
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
                 strPtr = strtok(NULL, " ");   // Move on the Callsign part
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
-                strPtr = strtok(NULL, " ");   // Move on the Locator part
+                strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
 
                 decodes[num_decoded].freq = (int32_t)freq_hz;
-                decodes[num_decoded].snr  = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
             }
 
             num_decoded++;

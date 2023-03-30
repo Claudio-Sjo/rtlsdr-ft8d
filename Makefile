@@ -2,13 +2,13 @@ CC = clang
 CXX = clang++
 CFLAGS= -O3 -std=gnu17
 CXXFLAGS= -O3 -x c++
-LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++
+LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 
 # Note
 #   gcc is a bit faster that clang on this app
 #   for dbg: -Wall -fsanitize=address
 
-OBJS = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/pack.o ft8_lib/ft8/unpack.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o pskreporter.o
+OBJS = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/pack.o ft8_lib/ft8/unpack.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o pskreporter.o ft8_ncurses.o
 
 TARGETS = rtlsdr_ft8d
 

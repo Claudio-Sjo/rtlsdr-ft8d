@@ -115,6 +115,7 @@ struct receiver_options {
     bool     selftest;
     bool     writefile;
     bool     readfile;
+    bool     qso;
     char     *filename;
 };
 

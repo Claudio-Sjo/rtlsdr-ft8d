@@ -20,7 +20,7 @@ sudo apt-get update && sudo apt-get -y install build-essential clang cmake libff
 
 echo "== Install rtl-sdr library (on RPi, don't use your distro package)"
 git clone https://github.com/steve-m/librtlsdr
-cd rtl-sdr
+cd librtlsdr
 mkdir -p make
 cd make
 cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DDETACH_KERNEL_DRIVER=ON -Wno-dev ..
@@ -29,9 +29,10 @@ sudo make install
 cd ../..
 
 echo "== Install rtlsdr-ft8d"
-git clone https://github.com/Guenael/rtlsdr-ft8d
+git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
 cd rtlsdr-ft8d
-git submodule update --init --recursive
+git clone https://github.com/kgoba/ft8_lib
+# git submodule update --init --recursive
 make
 sudo make install
 
