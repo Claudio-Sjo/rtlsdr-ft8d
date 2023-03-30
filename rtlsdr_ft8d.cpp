@@ -458,32 +458,29 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
-char mystring[255];
 
     if (n_results == 0) {
-        sprintf(mystring,"No spot %04d-%02d-%02d %02d:%02dz\n",
+        mvwprintw(logw,1,2,"No spot %04d-%02d-%02d %02d:%02dz\n",
                rx_state.gtm->tm_year + 1900,
                rx_state.gtm->tm_mon + 1,
                rx_state.gtm->tm_mday,
                rx_state.gtm->tm_hour,
                rx_state.gtm->tm_min);
-        n_printf(rx_options.qso,mystring);
-
+        wrefresh(logw);
         return;
     }
 
-    sprintf(mystring,"  Score     Freq       Call    Loc\n");
-    n_printf(rx_options.qso,mystring);
+    mvwprintw(logw,1,2,"  Score     Freq       Call    Loc\n");
 
     for (uint32_t i = 0; i < n_results; i++) {
-        sprintf(mystring,"     %2d %8d %10s %6s\n",
+        mvwprintw(logw,2+i,2,"     %2d %8d %10s %6s\n",
                dec_results[i].snr,
                dec_results[i].freq + dec_options.freq,
                dec_results[i].call,
                dec_results[i].loc);
-        n_printf(rx_options.qso,mystring);
-
     }
+    wrefresh(logw);
+wgetch(logw);
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -731,7 +728,6 @@ int32_t decoderSelfTest() {
     static uint32_t samples_len = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
     int32_t n_results = 0;
 
-    char mystring[255];
 
     /* Ref test message
      * Message : "CQ K1JT FN20QI"
@@ -742,8 +738,7 @@ int32_t decoderSelfTest() {
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
-        sprintf(mystring,"Cannot parse message!\n");
-        n_printf(rx_options.qso,mystring);
+        wprintw(logw,"Cannot parse message!\n");
         return 0;
     }
 
@@ -1006,14 +1001,13 @@ int main(int argc, char **argv) {
     dec_options.freq = rx_options.dialfreq;
 
     if (rx_options.selftest == true) {
-        char mystring[255];
         if (decoderSelfTest()) {
-            sprintf(mystring,"Self-test SUCCESS!\n");
-            n_printf(rx_options.qso,mystring);
+            wprintw(logw,"Self-test SUCCESS!\n");
+            wrefresh(logw);
             return EXIT_SUCCESS;
         } else {
-            sprintf(mystring,"Self-test FAILED!\n");
-            n_printf(rx_options.qso,mystring);
+            wprintw(logw,"Self-test FAILED!\n");
+            wrefresh(logw);
             return EXIT_FAILURE;
         }
     }
