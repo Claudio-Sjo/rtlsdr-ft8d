@@ -389,7 +389,7 @@ void postSpots(uint32_t n_results) {
     }
 
     if (!reporter) {
-        printf("Inited!\n");
+        wprintw(qso,"Inited!\n");
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -1015,13 +1015,13 @@ int main(int argc, char **argv) {
     }
 
     if (rx_options.readfile == true) {
-        fprintf(stdout, "Reading IQ file: %s\n", rx_options.filename);
+        wprintw(qso, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
         return exit_ft8(rx_options.qso,EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
-        fprintf(stdout, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
+        wprintw(qso, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
     }
 
     /* If something goes wrong... */
@@ -1058,7 +1058,7 @@ int main(int argc, char **argv) {
     if (rx_options.directsampling) {
         rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
         if (rtl_result < 0) {
-            fprintf(stderr, "ERROR: Failed to set direct sampling\n");
+            wprintw(qso, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1066,14 +1066,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to set sample rate\n");
+        wprintw(qso, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to enable manual gain\n");
+        wprintw(qso, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
@@ -1081,14 +1081,14 @@ int main(int argc, char **argv) {
     if (rx_options.autogain) {
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
         if (rtl_result != 0) {
-            fprintf(stderr, "ERROR: Failed to set tuner gain\n");
+            wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
-            fprintf(stderr, "ERROR: Failed to set tuner gain\n");
+            wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1097,7 +1097,7 @@ int main(int argc, char **argv) {
     if (rx_options.ppm != 0) {
         rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
         if (rtl_result < 0) {
-            fprintf(stderr, "ERROR: Failed to set ppm error\n");
+            wprintw(qso, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1105,14 +1105,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to set frequency\n");
+        wprintw(qso, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to reset buffers.\n");
+        wprintw(qso, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
@@ -1198,7 +1198,7 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    printf("Bye!\n");
+    wprintw(qso,"Bye!\n");
 
     return exit_ft8(rx_options.qso,EXIT_SUCCESS);
 }

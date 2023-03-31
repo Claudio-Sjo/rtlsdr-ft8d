@@ -82,8 +82,9 @@ int close_ncurses() {
     return (0);
 }
 
-int exit_ft8(bool qso, int status) {
-    if (qso == true) {
+int exit_ft8(bool qsomode, int status) {
+    if (qsomode == true) {
+        wrefresh(qso);
         close_ncurses();
     }
     return status;
