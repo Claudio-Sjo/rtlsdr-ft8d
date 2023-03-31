@@ -73,7 +73,7 @@ This application written in C does:
   4. Install `rtl-sdr` library manually. **Do not use the `librtlsdr-dev` package on Raspberry PiOS**. There is a know bug with this lib and rtlsdr_wsprd will not be able to get enough samples (don't decode anything & 100% CPU pattern).
      ```bash
      git clone https://github.com/steve-m/librtlsdr
-     cd rtl-sdr
+     cd librtlsdr
      mkdir -p make
      cd make
      cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DDETACH_KERNEL_DRIVER=ON -Wno-dev ..
@@ -87,7 +87,7 @@ This application written in C does:
      ```bash
      git clone https://github.com/Guenael/rtlsdr-ft8d
      cd rtlsdr-ft8d
-     git submodule update --init --recursive
+     git clone https://github.com/kgoba/ft8_lib
      ```
 
   6. Build the application:

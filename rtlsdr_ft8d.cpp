@@ -74,8 +74,8 @@ vector<struct decoder_results> dec_results_queue;
 int dec_results_queue_index = 0;
 
 /* Could be nice to update this one with the CI */
-const char rtlsdr_ft8d_version[] = "0.3.6";
-const char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.6";
+char rtlsdr_ft8d_version[] = "0.3.7";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.7";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -458,29 +458,27 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
-
     if (n_results == 0) {
-        mvwprintw(logw,1,2,"No spot %04d-%02d-%02d %02d:%02dz\n",
-               rx_state.gtm->tm_year + 1900,
-               rx_state.gtm->tm_mon + 1,
-               rx_state.gtm->tm_mday,
-               rx_state.gtm->tm_hour,
-               rx_state.gtm->tm_min);
+        mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
+                  rx_state.gtm->tm_year + 1900,
+                  rx_state.gtm->tm_mon + 1,
+                  rx_state.gtm->tm_mday,
+                  rx_state.gtm->tm_hour,
+                  rx_state.gtm->tm_min);
         wrefresh(logw);
         return;
     }
 
-    mvwprintw(logw,1,2,"  Score     Freq       Call    Loc\n");
+    mvwprintw(logw, 1, 2, "  Score     Freq       Call    Loc\n");
 
     for (uint32_t i = 0; i < n_results; i++) {
-        mvwprintw(logw,2+i,2,"     %2d %8d %10s %6s\n",
-               dec_results[i].snr,
-               dec_results[i].freq + dec_options.freq,
-               dec_results[i].call,
-               dec_results[i].loc);
+        mvwprintw(logw, 2 + i, 2, "     %2d %8d %10s %6s\n",
+                  dec_results[i].snr,
+                  dec_results[i].freq + dec_options.freq,
+                  dec_results[i].call,
+                  dec_results[i].loc);
     }
     wrefresh(logw);
-wgetch(logw);
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -728,7 +726,6 @@ int32_t decoderSelfTest() {
     static uint32_t samples_len = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
     int32_t n_results = 0;
 
-
     /* Ref test message
      * Message : "CQ K1JT FN20QI"
      * Packed data: 00 00 00 20 4d fc dc 8a 14 08
@@ -738,7 +735,7 @@ int32_t decoderSelfTest() {
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
-        wprintw(logw,"Cannot parse message!\n");
+        wprintw(logw, "Cannot parse message!\n");
         return 0;
     }
 
@@ -979,19 +976,19 @@ int main(int argc, char **argv) {
         if (rx_options.dialfreq == 0) {
             fprintf(stderr, "Please specify a dial frequency.\n");
             fprintf(stderr, " --help for usage...\n");
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
 
         if (dec_options.rcall[0] == 0) {
             fprintf(stderr, "Please specify your callsign.\n");
             fprintf(stderr, " --help for usage...\n");
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
 
         if (dec_options.rloc[0] == 0) {
             fprintf(stderr, "Please specify your locator.\n");
             fprintf(stderr, " --help for usage...\n");
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
     /* Calcule shift offset */
@@ -1002,20 +999,20 @@ int main(int argc, char **argv) {
 
     if (rx_options.selftest == true) {
         if (decoderSelfTest()) {
-            wprintw(logw,"Self-test SUCCESS!\n");
+            wprintw(logw, "Self-test SUCCESS!\n");
             wrefresh(logw);
-            return EXIT_SUCCESS;
+            return exit_ft8(rx_options.qso,EXIT_SUCCESS);
         } else {
-            wprintw(logw,"Self-test FAILED!\n");
+            wprintw(logw, "Self-test FAILED!\n");
             wrefresh(logw);
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
 
     if (rx_options.readfile == true) {
         fprintf(stdout, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
-        return EXIT_SUCCESS;
+        return exit_ft8(rx_options.qso,EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
@@ -1034,7 +1031,7 @@ int main(int argc, char **argv) {
     rtl_count = rtlsdr_get_device_count();
     if (!rtl_count) {
         fprintf(stderr, "No supported devices found\n");
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     fprintf(stderr, "Found %d device(s):\n", rtl_count);
@@ -1047,7 +1044,7 @@ int main(int argc, char **argv) {
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
         fprintf(stderr, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     if (rx_options.directsampling) {
@@ -1055,7 +1052,7 @@ int main(int argc, char **argv) {
         if (rtl_result < 0) {
             fprintf(stderr, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
 
@@ -1063,14 +1060,14 @@ int main(int argc, char **argv) {
     if (rtl_result < 0) {
         fprintf(stderr, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
         fprintf(stderr, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     if (rx_options.autogain) {
@@ -1078,14 +1075,14 @@ int main(int argc, char **argv) {
         if (rtl_result != 0) {
             fprintf(stderr, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
             fprintf(stderr, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
 
@@ -1094,7 +1091,7 @@ int main(int argc, char **argv) {
         if (rtl_result < 0) {
             fprintf(stderr, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
-            return EXIT_FAILURE;
+            return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
 
@@ -1102,14 +1099,14 @@ int main(int argc, char **argv) {
     if (rtl_result < 0) {
         fprintf(stderr, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
         fprintf(stderr, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
-        return EXIT_FAILURE;
+        return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     /* Time alignment & info */
@@ -1194,11 +1191,7 @@ int main(int argc, char **argv) {
 
     printf("Bye!\n");
 
-    if (rx_options.qso == true) {
-        close_ncurses();
-    }
-
-    return EXIT_SUCCESS;
+    return exit_ft8(rx_options.qso,EXIT_SUCCESS);
 }
 
 /*

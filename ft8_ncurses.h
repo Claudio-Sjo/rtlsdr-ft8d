@@ -5,6 +5,7 @@
 int init_ncurses();
 int close_ncurses();
 int n_printf (bool ncwin, char *prn);
+int exit_ft8(bool qso,int status);
 
 extern WINDOW *logw;
 
