@@ -66,6 +66,8 @@ int init_ncurses() {
     wattrset(qso, A_NORMAL);
     wattrset(call, A_NORMAL);
 
+    scrollok(qso, TRUE);
+
     refresh();
 
     return (0);
