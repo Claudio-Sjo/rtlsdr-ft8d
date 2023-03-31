@@ -74,6 +74,9 @@ struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
 int dec_results_queue_index = 0;
 
+/* mutex for thread sync */
+pthread_mutex_t msglock;
+
 /* Could be nice to update this one with the CI */
 char rtlsdr_ft8d_version[] = "0.3.7";
 char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.7";
@@ -389,7 +392,8 @@ void postSpots(uint32_t n_results) {
     }
 
     if (!reporter) {
-        wprintw(qso,"Inited!\n");
+        wprintw(qso,"Initialized!\n");
+        wrefresh(logw);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -473,11 +477,15 @@ void printSpots(uint32_t n_results) {
     mvwprintw(logw, 1, 2, "  Score     Freq       Call    Loc\n");
 
     for (uint32_t i = 0; i < n_results; i++) {
+        pthread_mutex_lock(&msglock); // Protect decodes structure
+
         mvwprintw(logw, 2 + i, 2, "     %2d %8d %10s %6s\n",
                   dec_results[i].snr,
                   dec_results[i].freq + dec_options.freq,
                   dec_results[i].call,
                   dec_results[i].loc);
+        
+        pthread_mutex_unlock(&msglock); // Protect decodes structure
     }
     wrefresh(logw);
 }
@@ -1329,8 +1337,14 @@ void ft8_subsystem(float *iSamples,
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
+            wprintw(qso,"%s\n",message.text);
+            wrefresh(qso);
+
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
+
+                pthread_mutex_lock(&msglock); // Protect decodes structure
+
                 strPtr = strtok(NULL, " ");   // Move on the Callsign part
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
@@ -1338,9 +1352,13 @@ void ft8_subsystem(float *iSamples,
 
                 decodes[num_decoded].freq = (int32_t)freq_hz;
                 decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+                pthread_mutex_unlock(&msglock);
+                
+                num_decoded++;
+
             }
 
-            num_decoded++;
         }
     }
     *n_results = num_decoded;
