@@ -1030,20 +1030,23 @@ int main(int argc, char **argv) {
     /* Init & parameter the device */
     rtl_count = rtlsdr_get_device_count();
     if (!rtl_count) {
-        fprintf(stderr, "No supported devices found\n");
+        wprintw(qso, "No supported devices found\n");
+        wrefresh(qso);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
-    fprintf(stderr, "Found %d device(s):\n", rtl_count);
+    wprintw(qso, "Found %d device(s):\n", rtl_count);
     for (uint32_t i = 0; i < rtl_count; i++) {
         rtlsdr_get_device_usb_strings(i, rtl_vendor, rtl_product, rtl_serial);
-        fprintf(stderr, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
+        wprintw(qso, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
     }
-    fprintf(stderr, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
+
+    wprintw(qso, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
+    wrefresh(qso);
 
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
+        wprintw(qso, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 

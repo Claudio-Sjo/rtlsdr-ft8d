@@ -30,7 +30,7 @@ int init_ncurses() {
     logw = subwin(stdscr, LINES / 2, COLS - 6, 2, 3);
 
     qso0 = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 2, 2);
-    qso = subwin(stdscr, (LINES / 2) - 7, COLS - 6, LINES / 2 + 2, 3);
+    qso = subwin(stdscr, (LINES / 2) - 9, COLS - 6, LINES / 2 + 3, 3);
 
     call0 = subwin(stdscr, 3, COLS - 4, LINES - 5, 2);
     call = subwin(stdscr, 3, COLS - 6, LINES - 5, 3);
