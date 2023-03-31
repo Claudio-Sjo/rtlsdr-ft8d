@@ -1119,24 +1119,25 @@ int main(int argc, char **argv) {
     struct tm *gtm = gmtime(&rawtime);
 
     /* Print used parameter */
-    printf("\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
+    wprintw(qso,"\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
            gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
-    printf("  Callsign     : %s\n", dec_options.rcall);
-    printf("  Locator      : %s\n", dec_options.rloc);
-    printf("  Dial freq.   : %d Hz\n", rx_options.dialfreq);
-    printf("  Real freq.   : %d Hz\n", rx_options.realfreq);
-    printf("  PPM factor   : %d\n", rx_options.ppm);
+    wprintw(qso,"  Callsign     : %s\n", dec_options.rcall);
+    wprintw(qso,"  Locator      : %s\n", dec_options.rloc);
+    wprintw(qso,"  Dial freq.   : %d Hz\n", rx_options.dialfreq);
+    wprintw(qso,"  Real freq.   : %d Hz\n", rx_options.realfreq);
+    wprintw(qso,"  PPM factor   : %d\n", rx_options.ppm);
     if (rx_options.autogain)
-        printf("  Auto gain    : enable\n");
+        wprintw(qso,"  Auto gain    : enable\n");
     else
-        printf("  Gain         : %d dB\n", rx_options.gain / 10);
+        wprintw(qso,"  Gain         : %d dB\n", rx_options.gain / 10);
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = 15000000 - usec;
-    printf("Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wprintw(qso,"Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wrefresh(qso);
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
