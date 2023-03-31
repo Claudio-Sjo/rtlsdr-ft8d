@@ -1,6 +1,7 @@
 /*
  * rtlsrd-ft8d, FT8 daemon for RTL receivers
  * Copyright (C) 2016-2021, Guenael Jouchet (VA2GKA)
+ * Copyright (C) 2023 Claudio Porfiri (SA0PRF)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
