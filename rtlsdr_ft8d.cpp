@@ -307,7 +307,7 @@ void initrx_options() {
     rx_options.writefile = false;
     rx_options.readfile = false;
     rx_options.noreport = false;
-    rx_options.qso = false;
+    rx_options.qso = true;
 }
 
 void initFFTW() {
@@ -795,7 +795,6 @@ void usage(FILE *stream, int32_t status) {
             "\t-a auto gain (off by default, no parameter)\n"
             "\t-o frequency offset (default: 0)\n"
             "\t-p crystal correction factor (ppm) (default: 0)\n"
-            "\t-q QSO interactive mode (default: false)\n"
             "\t-u upconverter (default: 0, example: 125M)\n"
             "\t-d direct dampling [0,1,2] (default: 0, 1 for I input, 2 for Q input)\n"
             "\t-n max iterations (default: 0 = infinite loop)\n"
@@ -816,7 +815,7 @@ void usage(FILE *stream, int32_t status) {
 
 int main(int argc, char **argv) {
     uint32_t opt;
-    const char *short_options = "f:c:l:g:ao:p:u:d:n:i:qxtw:r:";
+    const char *short_options = "f:c:l:g:ao:p:u:d:n:i:xtw:r:";
     int32_t option_index = 0;
     struct option long_options[] = {
         {"help", no_argument, 0, 0},
@@ -826,6 +825,9 @@ int main(int argc, char **argv) {
     int32_t rtl_result;
     int32_t rtl_count;
     char rtl_vendor[256], rtl_product[256], rtl_serial[256];
+
+    FILE *stream;
+    stream = fopen("/tmp/ft8.log", "w+");
 
     initrx_options();
 
@@ -938,9 +940,6 @@ int main(int argc, char **argv) {
             case 'n':  // Stop after n iterations
                 rx_options.maxloop = (uint32_t)atofs(optarg);
                 break;
-            case 'q':  // Set QSO mode)
-                rx_options.qso = true;
-                break;
             case 'i':  // Select the device to use
                 rx_options.device = (uint32_t)atofs(optarg);
                 break;
@@ -991,6 +990,11 @@ int main(int argc, char **argv) {
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     }
+
+/* Now we can mute stderr */
+    stderr = stream;
+
+
     /* Calcule shift offset */
     rx_options.realfreq = rx_options.dialfreq + rx_options.shift + rx_options.upconverter;
 
