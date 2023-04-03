@@ -310,7 +310,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = false;
+    rx_options.noreport = true;
     rx_options.qso = true;
 }
 
@@ -463,7 +463,7 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
-    if (n_results == 0) {
+/*   if (n_results == 0) {
         mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
                   rx_state.gtm->tm_year + 1900,
                   rx_state.gtm->tm_mon + 1,
@@ -473,15 +473,18 @@ void printSpots(uint32_t n_results) {
         wrefresh(logw);
         return;
     }
-
-    mvwprintw(logw, 1, 2, "  Score     Freq       Call    Loc\n");
+*/ 
+    mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock); // Protect decodes structure
 
-        mvwprintw(logw, 2 + i, 2, "     %2d %8d %10s %6s\n",
+        mvwprintw(logw, 2 + i, 2, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+                  rx_state.gtm->tm_hour,
+                  rx_state.gtm->tm_min,
                   dec_results[i].snr,
                   dec_results[i].freq + dec_options.freq,
+                  dec_results[i].cmd,
                   dec_results[i].call,
                   dec_results[i].loc);
         
@@ -1337,7 +1340,15 @@ void ft8_subsystem(float *iSamples,
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            wprintw(qso,"%s\n",message.text);
+            wattrset(qso, A_NORMAL);
+
+            if (strstr(message.text,"CQ ") == message.text)
+            {
+                wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
+            }
+
+            wprintw(qso,"%dHz - %02d - %s\n",(int32_t) freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
+
             wrefresh(qso);
 
             char *strPtr = strtok(message.text, " ");
@@ -1345,7 +1356,13 @@ void ft8_subsystem(float *iSamples,
 
                 pthread_mutex_lock(&msglock); // Protect decodes structure
 
-                strPtr = strtok(NULL, " ");   // Move on the Callsign part
+                strPtr = strtok(NULL, " ");   // Move on the XY or Callsign part
+                if (strlen(strPtr) == 2){
+                    sprintf(decodes[num_decoded].cmd,"CQ %s ",strPtr);
+                    strPtr = strtok(NULL, " ");   // Move on the Callsign part
+                }
+                else
+                    sprintf(decodes[num_decoded].cmd,"CQ   ");
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
