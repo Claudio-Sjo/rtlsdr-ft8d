@@ -310,7 +310,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = true;
+    rx_options.noreport = false;
     rx_options.qso = true;
 }
 
@@ -356,7 +356,7 @@ inline uint32_t SwapEndian32(uint32_t val) {
     return (val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24);
 }
 
-PskReporter *reporter;
+PskReporter *reporter = NULL;
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -389,12 +389,6 @@ void postSpots(uint32_t n_results) {
     if (rx_options.noreport) {
         LOG(LOG_DEBUG, "Decoder thread -- Skipping the reporting\n");
         return;
-    }
-
-    if (!reporter) {
-        wprintw(qso,"Initialized!\n");
-        wrefresh(logw);
-        reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
     /* Fixed strings for Mode */
@@ -1003,6 +997,13 @@ int main(int argc, char **argv) {
             fprintf(stderr, " --help for usage...\n");
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
+    }
+
+
+    if (!rx_options.noreport) {
+        wprintw(qso,"PSK Reporter Initialized!\n");
+        wrefresh(logw);
+        reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
 /* Now we can mute stderr */
