@@ -1,6 +1,7 @@
 /*
  * rtlsrd-ft8d, FT8 daemon for RTL receivers
  * Copyright (C) 2016-2021, Guenael Jouchet (VA2GKA)
+ * Copyright (C) 2023 Claudio Porfiri (SA0PRF)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -72,6 +73,9 @@ struct decoder_options dec_options;
 struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
 int dec_results_queue_index = 0;
+
+/* mutex for thread sync */
+pthread_mutex_t msglock;
 
 /* Could be nice to update this one with the CI */
 char rtlsdr_ft8d_version[] = "0.3.7";
@@ -306,7 +310,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = false;
+    rx_options.noreport = true;
     rx_options.qso = true;
 }
 
@@ -388,7 +392,8 @@ void postSpots(uint32_t n_results) {
     }
 
     if (!reporter) {
-        printf("Inited!\n");
+        wprintw(qso,"Initialized!\n");
+        wrefresh(logw);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -458,7 +463,8 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
-    if (n_results == 0) {
+
+/*   if (n_results == 0) {
         mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
                   rx_state.gtm->tm_year + 1900,
                   rx_state.gtm->tm_mon + 1,
@@ -468,17 +474,25 @@ void printSpots(uint32_t n_results) {
         wrefresh(logw);
         return;
     }
-
-    mvwprintw(logw, 1, 2, "  Score     Freq       Call    Loc\n");
+*/ 
+    mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
+    wrefresh(logw);
 
     for (uint32_t i = 0; i < n_results; i++) {
-        mvwprintw(logw, 2 + i, 2, "     %2d %8d %10s %6s\n",
+        pthread_mutex_lock(&msglock); // Protect decodes structure
+
+        wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+                  rx_state.gtm->tm_hour,
+                  rx_state.gtm->tm_min,
                   dec_results[i].snr,
                   dec_results[i].freq + dec_options.freq,
+                  dec_results[i].cmd,
                   dec_results[i].call,
                   dec_results[i].loc);
+        
+        pthread_mutex_unlock(&msglock); // Protect decodes structure
     }
-    wrefresh(logw);
+    wrefresh(logw1);
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -1014,13 +1028,13 @@ int main(int argc, char **argv) {
     }
 
     if (rx_options.readfile == true) {
-        fprintf(stdout, "Reading IQ file: %s\n", rx_options.filename);
+        wprintw(qso, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
         return exit_ft8(rx_options.qso,EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
-        fprintf(stdout, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
+        wprintw(qso, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
     }
 
     /* If something goes wrong... */
@@ -1057,7 +1071,7 @@ int main(int argc, char **argv) {
     if (rx_options.directsampling) {
         rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
         if (rtl_result < 0) {
-            fprintf(stderr, "ERROR: Failed to set direct sampling\n");
+            wprintw(qso, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1065,14 +1079,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to set sample rate\n");
+        wprintw(qso, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to enable manual gain\n");
+        wprintw(qso, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
@@ -1080,14 +1094,14 @@ int main(int argc, char **argv) {
     if (rx_options.autogain) {
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
         if (rtl_result != 0) {
-            fprintf(stderr, "ERROR: Failed to set tuner gain\n");
+            wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
-            fprintf(stderr, "ERROR: Failed to set tuner gain\n");
+            wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1096,7 +1110,7 @@ int main(int argc, char **argv) {
     if (rx_options.ppm != 0) {
         rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
         if (rtl_result < 0) {
-            fprintf(stderr, "ERROR: Failed to set ppm error\n");
+            wprintw(qso, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso,EXIT_FAILURE);
         }
@@ -1104,14 +1118,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to set frequency\n");
+        wprintw(qso, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
-        fprintf(stderr, "ERROR: Failed to reset buffers.\n");
+        wprintw(qso, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso,EXIT_FAILURE);
     }
@@ -1197,7 +1211,7 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    printf("Bye!\n");
+    wprintw(qso,"Bye!\n");
 
     return exit_ft8(rx_options.qso,EXIT_SUCCESS);
 }
@@ -1328,18 +1342,42 @@ void ft8_subsystem(float *iSamples,
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
+            wattrset(qso, A_NORMAL);
+
+            if (strstr(message.text,"CQ ") == message.text)
+            {
+                wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
+            }
+
+            wprintw(qso,"%dHz - %02d - %s\n",(int32_t) freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
+
+            wrefresh(qso);
+
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
-                strPtr = strtok(NULL, " ");   // Move on the Callsign part
+
+                pthread_mutex_lock(&msglock); // Protect decodes structure
+
+                strPtr = strtok(NULL, " ");   // Move on the XY or Callsign part
+                if (strlen(strPtr) == 2){
+                    sprintf(decodes[num_decoded].cmd,"CQ %s",strPtr);
+                    strPtr = strtok(NULL, " ");   // Move on the Callsign part
+                }
+                else
+                    sprintf(decodes[num_decoded].cmd,"CQ   ");
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
 
                 decodes[num_decoded].freq = (int32_t)freq_hz;
                 decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+                pthread_mutex_unlock(&msglock);
+                
+                num_decoded++;
+
             }
 
-            num_decoded++;
         }
     }
     *n_results = num_decoded;

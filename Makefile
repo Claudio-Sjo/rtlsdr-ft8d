@@ -1,7 +1,7 @@
 CC = clang
 CXX = clang++
-CFLAGS= -O3 -std=gnu17
-CXXFLAGS= -O3 -x c++
+CFLAGS= -O3 -std=gnu17 -g
+CXXFLAGS= -O3 -x c++ -g
 LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 
 # Note
