@@ -11,7 +11,7 @@ extern char pskreporter_app_version[];
 
 WINDOW *root;
 
-WINDOW *logw, *logw0;
+WINDOW *logw, *logw0, *logw1;
 
 WINDOW *qso, *qso0;
 
@@ -27,7 +27,8 @@ int init_ncurses() {
     root = subwin(stdscr, 1, COLS - 4, 1, 2);
 
     logw0 = subwin(stdscr, LINES / 2, COLS - 4, 2, 2);
-    logw = subwin(stdscr, LINES / 2, COLS - 6, 2, 3);
+    logw = subwin(stdscr, (LINES / 2) - 2, COLS - 6, 2, 3);
+    logw1 = subwin(stdscr, (LINES / 2) - 3, COLS - 6, 4, 3);
 
     qso0 = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 2, 2);
     qso = subwin(stdscr, (LINES / 2) - 9, COLS - 6, LINES / 2 + 3, 3);
@@ -42,8 +43,8 @@ int init_ncurses() {
     init_pair(4, COLOR_CYAN, COLOR_BLACK);
 
     attrset(COLOR_PAIR(1) | A_BOLD);
-    wattrset(logw0, COLOR_PAIR(1) | A_BOLD);
-    wattrset(qso0, COLOR_PAIR(3) | A_BOLD);
+    wattrset(logw0, COLOR_PAIR(3) | A_BOLD);
+    wattrset(qso0, COLOR_PAIR(1) | A_BOLD);
     wattrset(call0, COLOR_PAIR(4) | A_BOLD);
 
     box(stdscr, 0, 0);
@@ -63,11 +64,15 @@ int init_ncurses() {
     mvwprintw(root, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), rtlsdr_ft8d_version);
 
     wattrset(logw, A_NORMAL);
+    wattrset(logw1, A_NORMAL);
     wattrset(qso, A_NORMAL);
     wattrset(call, A_NORMAL);
 
     scrollok(qso, true);
     idlok(qso, true);
+
+    scrollok(logw1, true);
+    idlok(logw1, true);
 
     refresh();
 

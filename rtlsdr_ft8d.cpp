@@ -463,6 +463,7 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
+
 /*   if (n_results == 0) {
         mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
                   rx_state.gtm->tm_year + 1900,
@@ -475,11 +476,12 @@ void printSpots(uint32_t n_results) {
     }
 */ 
     mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
+    wrefresh(logw);
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock); // Protect decodes structure
 
-        mvwprintw(logw, 2 + i, 2, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+        wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                   rx_state.gtm->tm_hour,
                   rx_state.gtm->tm_min,
                   dec_results[i].snr,
@@ -490,7 +492,7 @@ void printSpots(uint32_t n_results) {
         
         pthread_mutex_unlock(&msglock); // Protect decodes structure
     }
-    wrefresh(logw);
+    wrefresh(logw1);
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -1358,7 +1360,7 @@ void ft8_subsystem(float *iSamples,
 
                 strPtr = strtok(NULL, " ");   // Move on the XY or Callsign part
                 if (strlen(strPtr) == 2){
-                    sprintf(decodes[num_decoded].cmd,"CQ %s ",strPtr);
+                    sprintf(decodes[num_decoded].cmd,"CQ %s",strPtr);
                     strPtr = strtok(NULL, " ");   // Move on the Callsign part
                 }
                 else

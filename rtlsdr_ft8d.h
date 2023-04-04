@@ -132,7 +132,6 @@ struct decoder_results {
     char     call[13];
     char     dest[13];
     char     loc[7];
-    char     text[25];
     int32_t  freq;
     int32_t  snr;
 };
