@@ -3,11 +3,9 @@
 ![rtlsdr-wsprd](art/rtlsdr-ft8d-web.jpg)
 
 ![Project Status](https://img.shields.io/badge/status-OK-green)
-![Workflow Status](https://img.shields.io/github/workflow/status/Guenael/rtlsdr-ft8d/CI)
-![Last commit](https://img.shields.io/github/last-commit/Guenael/rtlsdr-ft8d)
-![Commit activity](https://img.shields.io/github/commit-activity/m/Guenael/rtlsdr-ft8d)
-
-**PROJECT STALLED -- Need help to test this project (automated reporting disabled for now)**
+![Workflow Status](https://img.shields.io/github/workflow/status/Claudio-Sjo/rtlsdr-ft8d/CI)
+![Last commit](https://img.shields.io/github/last-commit/Claudio-Sjo/rtlsdr-ft8d)
+![Commit activity](https://img.shields.io/github/commit-activity/m/Claudio-Sjo/rtlsdr-ft8d)
 
 ## TL;DR
 
@@ -85,7 +83,7 @@ This application written in C does:
 
   5. Clone this repository:
      ```bash
-     git clone https://github.com/Guenael/rtlsdr-ft8d
+     git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
      cd rtlsdr-ft8d
      git clone https://github.com/kgoba/ft8_lib
      ```
@@ -117,7 +115,7 @@ If the `modprobe -r` command errors, a reboot is recommended to unload the modul
 You can then start the container with the right parameters/options for you (frequency, callsign, locator etc... Fake example below):
 
 ```bash
-docker run --rm -it --pull=always --device=/dev/bus/usb ghcr.io/guenael/rtlsdr-ft8d:latest -f 2m -c A1XYZ -l AB12cd -g 29
+docker run --rm -it --pull=always --device=/dev/bus/usb ghcr.io/Claudio-Sjo/rtlsdr-ft8d:latest -f 2m -c A1XYZ -l AB12cd -g 29
 ```
 
 

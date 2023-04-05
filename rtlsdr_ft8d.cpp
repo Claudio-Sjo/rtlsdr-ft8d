@@ -367,13 +367,24 @@ void *pskUploader(void *vargp) {
         if (dec_results_queue.size() > 0) {
             sleep(60);
             pthread_mutex_lock(&lock);
-            for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
+
+            while (dec_results_queue.size() > MAX_REPORTS_PER_PACKET) {
+                for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
+                    struct decoder_results dr = dec_results_queue.front();
+                    reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
+                    dec_results_queue.erase(dec_results_queue.begin());
+                }
+                reporter->send();
+            }
+
+            while (dec_results_queue.size()) {
                 struct decoder_results dr = dec_results_queue.front();
                 reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
                 dec_results_queue.erase(dec_results_queue.begin());
             }
-            pthread_mutex_unlock(&lock);
             reporter->send();
+            pthread_mutex_unlock(&lock);
+
         } else {
             sleep(60);
         }
@@ -457,34 +468,33 @@ void webClusterSpots(uint32_t n_results) {
 }
 
 void printSpots(uint32_t n_results) {
-
-/*   if (n_results == 0) {
-        mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
-                  rx_state.gtm->tm_year + 1900,
-                  rx_state.gtm->tm_mon + 1,
-                  rx_state.gtm->tm_mday,
-                  rx_state.gtm->tm_hour,
-                  rx_state.gtm->tm_min);
-        wrefresh(logw);
-        return;
-    }
-*/ 
+    /*   if (n_results == 0) {
+            mvwprintw(logw, 1, 2, "No spot %04d-%02d-%02d %02d:%02dz\n",
+                      rx_state.gtm->tm_year + 1900,
+                      rx_state.gtm->tm_mon + 1,
+                      rx_state.gtm->tm_mday,
+                      rx_state.gtm->tm_hour,
+                      rx_state.gtm->tm_min);
+            wrefresh(logw);
+            return;
+        }
+    */
     mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
     wrefresh(logw);
 
     for (uint32_t i = 0; i < n_results; i++) {
-        pthread_mutex_lock(&msglock); // Protect decodes structure
+        pthread_mutex_lock(&msglock);  // Protect decodes structure
 
         wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
-                  rx_state.gtm->tm_hour,
-                  rx_state.gtm->tm_min,
-                  dec_results[i].snr,
-                  dec_results[i].freq + dec_options.freq,
-                  dec_results[i].cmd,
-                  dec_results[i].call,
-                  dec_results[i].loc);
-        
-        pthread_mutex_unlock(&msglock); // Protect decodes structure
+                rx_state.gtm->tm_hour,
+                rx_state.gtm->tm_min,
+                dec_results[i].snr,
+                dec_results[i].freq + dec_options.freq,
+                dec_results[i].cmd,
+                dec_results[i].call,
+                dec_results[i].loc);
+
+        pthread_mutex_unlock(&msglock);  // Protect decodes structure
     }
     wrefresh(logw1);
 }
@@ -983,32 +993,30 @@ int main(int argc, char **argv) {
         if (rx_options.dialfreq == 0) {
             fprintf(stderr, "Please specify a dial frequency.\n");
             fprintf(stderr, " --help for usage...\n");
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
 
         if (dec_options.rcall[0] == 0) {
             fprintf(stderr, "Please specify your callsign.\n");
             fprintf(stderr, " --help for usage...\n");
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
 
         if (dec_options.rloc[0] == 0) {
             fprintf(stderr, "Please specify your locator.\n");
             fprintf(stderr, " --help for usage...\n");
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
-
     if (!rx_options.noreport) {
-        wprintw(qso,"PSK Reporter Initialized!\n");
+        wprintw(qso, "PSK Reporter Initialized!\n");
         wrefresh(logw);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
-/* Now we can mute stderr */
+    /* Now we can mute stderr */
     stderr = stream;
-
 
     /* Calcule shift offset */
     rx_options.realfreq = rx_options.dialfreq + rx_options.shift + rx_options.upconverter;
@@ -1020,18 +1028,18 @@ int main(int argc, char **argv) {
         if (decoderSelfTest()) {
             wprintw(logw, "Self-test SUCCESS!\n");
             wrefresh(logw);
-            return exit_ft8(rx_options.qso,EXIT_SUCCESS);
+            return exit_ft8(rx_options.qso, EXIT_SUCCESS);
         } else {
             wprintw(logw, "Self-test FAILED!\n");
             wrefresh(logw);
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
     if (rx_options.readfile == true) {
         wprintw(qso, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
-        return exit_ft8(rx_options.qso,EXIT_SUCCESS);
+        return exit_ft8(rx_options.qso, EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
@@ -1051,7 +1059,7 @@ int main(int argc, char **argv) {
     if (!rtl_count) {
         wprintw(qso, "No supported devices found\n");
         wrefresh(qso);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     wprintw(qso, "Found %d device(s):\n", rtl_count);
@@ -1066,7 +1074,7 @@ int main(int argc, char **argv) {
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
         wprintw(qso, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     if (rx_options.directsampling) {
@@ -1074,7 +1082,7 @@ int main(int argc, char **argv) {
         if (rtl_result < 0) {
             wprintw(qso, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
@@ -1082,14 +1090,14 @@ int main(int argc, char **argv) {
     if (rtl_result < 0) {
         wprintw(qso, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
         wprintw(qso, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     if (rx_options.autogain) {
@@ -1097,14 +1105,14 @@ int main(int argc, char **argv) {
         if (rtl_result != 0) {
             wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
             wprintw(qso, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
@@ -1113,7 +1121,7 @@ int main(int argc, char **argv) {
         if (rtl_result < 0) {
             wprintw(qso, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso,EXIT_FAILURE);
+            return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
@@ -1121,14 +1129,14 @@ int main(int argc, char **argv) {
     if (rtl_result < 0) {
         wprintw(qso, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
         wprintw(qso, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso,EXIT_FAILURE);
+        return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     /* Time alignment & info */
@@ -1138,24 +1146,24 @@ int main(int argc, char **argv) {
     struct tm *gtm = gmtime(&rawtime);
 
     /* Print used parameter */
-    wprintw(qso,"\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
-           gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
-    wprintw(qso,"  Callsign     : %s\n", dec_options.rcall);
-    wprintw(qso,"  Locator      : %s\n", dec_options.rloc);
-    wprintw(qso,"  Dial freq.   : %d Hz\n", rx_options.dialfreq);
-    wprintw(qso,"  Real freq.   : %d Hz\n", rx_options.realfreq);
-    wprintw(qso,"  PPM factor   : %d\n", rx_options.ppm);
+    wprintw(qso, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
+            gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
+    wprintw(qso, "  Callsign     : %s\n", dec_options.rcall);
+    wprintw(qso, "  Locator      : %s\n", dec_options.rloc);
+    wprintw(qso, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
+    wprintw(qso, "  Real freq.   : %d Hz\n", rx_options.realfreq);
+    wprintw(qso, "  PPM factor   : %d\n", rx_options.ppm);
     if (rx_options.autogain)
-        wprintw(qso,"  Auto gain    : enable\n");
+        wprintw(qso, "  Auto gain    : enable\n");
     else
-        wprintw(qso,"  Gain         : %d dB\n", rx_options.gain / 10);
+        wprintw(qso, "  Gain         : %d dB\n", rx_options.gain / 10);
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = 15000000 - usec;
-    wprintw(qso,"Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wprintw(qso, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
     wrefresh(qso);
 
     /* Prepare a low priority param for the decoder thread */
@@ -1212,9 +1220,9 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    wprintw(qso,"Bye!\n");
+    wprintw(qso, "Bye!\n");
 
-    return exit_ft8(rx_options.qso,EXIT_SUCCESS);
+    return exit_ft8(rx_options.qso, EXIT_SUCCESS);
 }
 
 /*
@@ -1345,27 +1353,25 @@ void ft8_subsystem(float *iSamples,
 
             wattrset(qso, A_NORMAL);
 
-            if (strstr(message.text,"CQ ") == message.text)
-            {
+            if (strstr(message.text, "CQ ") == message.text) {
                 wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
             }
 
-            wprintw(qso,"%dHz - %02d - %s\n",(int32_t) freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
+            wprintw(qso, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
 
             wrefresh(qso);
 
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
-                pthread_mutex_lock(&msglock); // Protect decodes structure
+                pthread_mutex_lock(&msglock);  // Protect decodes structure
 
-                strPtr = strtok(NULL, " ");   // Move on the XY or Callsign part
-                if (strlen(strPtr) == 2){
-                    sprintf(decodes[num_decoded].cmd,"CQ %s",strPtr);
-                    strPtr = strtok(NULL, " ");   // Move on the Callsign part
-                }
-                else
-                    sprintf(decodes[num_decoded].cmd,"CQ   ");
+                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
+                if (strlen(strPtr) == 2) {
+                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
+                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
+                } else
+                    sprintf(decodes[num_decoded].cmd, "CQ   ");
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
@@ -1374,11 +1380,9 @@ void ft8_subsystem(float *iSamples,
                 decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
                 pthread_mutex_unlock(&msglock);
-                
+
                 num_decoded++;
-
             }
-
         }
     }
     *n_results = num_decoded;
