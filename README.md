@@ -7,8 +7,6 @@
 ![Last commit](https://img.shields.io/github/last-commit/Claudio-Sjo/rtlsdr-ft8d)
 ![Commit activity](https://img.shields.io/github/commit-activity/m/Claudio-Sjo/rtlsdr-ft8d)
 
-**PROJECT STALLED -- Need help to test this project (automated reporting disabled for now)**
-
 ## TL;DR
 
 This project aim at decoding [FT8](https://en.wikipedia.org/wiki/WSJT_(amateur_radio_software)#FT8) signals using an [RTL device](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr), usually connected to a [Raspberry Pi](https://www.raspberrypi.org/).
