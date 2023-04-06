@@ -13,3 +13,7 @@ extern WINDOW *logw1;
 extern WINDOW *qso;
 
 extern WINDOW *call;
+
+/* CQ Handler Thread */
+void *CQHandler(void *vargp);
+void *KBDHandler(void *vargp);

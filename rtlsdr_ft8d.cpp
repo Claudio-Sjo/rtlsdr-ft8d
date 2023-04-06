@@ -72,10 +72,13 @@ struct receiver_options rx_options;
 struct decoder_options dec_options;
 struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
+vector<struct decoder_results> cq_queue;
 int dec_results_queue_index = 0;
 
 /* mutex for thread sync */
-pthread_mutex_t msglock;
+pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;;
+pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
+
 
 /* Could be nice to update this one with the CI */
 char rtlsdr_ft8d_version[] = "0.3.7";
@@ -484,6 +487,8 @@ void printSpots(uint32_t n_results) {
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
+        /* CQlock */
+        pthread_mutex_lock(&CQlock);  // Protect decodes structure
 
         wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
@@ -494,6 +499,15 @@ void printSpots(uint32_t n_results) {
                 dec_results[i].call,
                 dec_results[i].loc);
 
+        /* Rather than printing the results, we exploit a queue */
+        struct decoder_results dr;
+
+        strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        dr.freq = dec_results[i].freq + dec_options.freq;
+        dr.snr = dec_results[i].snr - 20;
+        cq_queue.push_back(dr);
+
+        pthread_mutex_unlock(&CQlock);  // Protect decodes structure
         pthread_mutex_unlock(&msglock);  // Protect decodes structure
     }
     wrefresh(logw1);
@@ -1182,6 +1196,8 @@ int main(int argc, char **argv) {
     pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
     pthread_create(&spottingThread, NULL, pskUploader, NULL);
+    pthread_create(&spottingThread, NULL, CQHandler, NULL);
+    pthread_create(&spottingThread, NULL, KBDHandler, NULL);
 
     /* Main loop : Wait, read, decode */
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {

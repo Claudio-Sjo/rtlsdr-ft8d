@@ -5,9 +5,19 @@
 #include <stdarg.h>
 #include <ncurses.h>
 #include <curses.h>
+#include <pthread.h>
+#include <assert.h>
+#include <vector>
+
+#include "./rtlsdr_ft8d.h"
 
 extern char rtlsdr_ft8d_version[];
 extern char pskreporter_app_version[];
+extern std::vector<struct decoder_results> cq_queue;
+extern pthread_mutex_t CQlock;
+
+pthread_mutex_t KBDlock;
+std::vector<char> kbd_queue;
 
 WINDOW *root;
 
@@ -17,7 +27,7 @@ WINDOW *qso, *qso0;
 
 WINDOW *call, *call0;
 
-int slines, scols, sposy, sposx;
+int logWLines;
 
 int init_ncurses() {
     initscr();
@@ -29,6 +39,8 @@ int init_ncurses() {
     logw0 = subwin(stdscr, LINES / 2, COLS - 4, 2, 2);
     logw = subwin(stdscr, (LINES / 2) - 2, COLS - 6, 2, 3);
     logw1 = subwin(stdscr, (LINES / 2) - 3, COLS - 6, 4, 3);
+
+    logWLines = (LINES / 2) - 3;
 
     qso0 = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 2, 2);
     qso = subwin(stdscr, (LINES / 2) - 9, COLS - 6, LINES / 2 + 3, 3);
@@ -105,4 +117,56 @@ int n_printf(bool ncwin, char *prn) {
         fprintf(stdout, "%s", prn);
 
     return (0);
+}
+
+/* KBD Handler Thread */
+void *KBDHandler(void *vargp) {
+    while (true) {
+        /* CQlock */
+
+        char key = wgetch(call);
+
+        pthread_mutex_lock(&KBDlock);  // Protect decodes structure
+
+        kbd_queue.push_back(key);
+
+        pthread_mutex_unlock(&KBDlock);  // Protect decodes structure
+        usleep(10000); // Wait 10msec
+    }
+}
+
+/* CQ Handler Thread */
+void *CQHandler(void *vargp) {
+
+    static bool refresh = false;
+
+    mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
+    wrefresh(logw);
+
+    while (true) {
+        char key;
+
+        if (cq_queue.size()){
+            pthread_mutex_lock(&CQlock);
+            struct decoder_results dr = cq_queue.front();
+            cq_queue.erase(cq_queue.begin());
+            pthread_mutex_unlock(&CQlock);
+
+
+            refresh = true;
+        }
+        if (kbd_queue.size()){
+            key = kbd_queue.front();
+            kbd_queue.erase(kbd_queue.begin());
+
+            refresh = true;
+        }
+        /* if needed update the screen */
+        if (refresh) {
+
+        }
+
+        refresh = false;
+        usleep(10000); /* Wait 10 msec.*/
+    }
 }
