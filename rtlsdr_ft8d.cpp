@@ -81,8 +81,8 @@ pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
 
 
 /* Could be nice to update this one with the CI */
-char rtlsdr_ft8d_version[] = "0.3.7";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.7";
+char rtlsdr_ft8d_version[] = "0.3.8a";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8a";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
