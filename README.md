@@ -40,7 +40,10 @@ rtlsdr_ft8d -f 2m -c A1XYZ -l AB12cd -g 29
 
 ## Overview
 
-This non-interactive application allows automatic reporting of FT8 messages on Internet with [PSKreporter](https://pskreporter.info/pskmap.html). The initial idea was to allow a small computer like a Raspberry Pi and a RTL-SDR device to send FT8 reports for [VHF/UHF](https://en.wikipedia.org/wiki/Amateur_radio_frequency_allocations#Very_high_frequencies_and_ultra_high_frequencies) bands. This kind of lightweight setup could run continuously without maintenance and help to get additional propagation reports. This code is just a glue between RTL libs and an FT8 open source library based on [Karlis Goba (YL3JG) work](https://github.com/kgoba/ft8_lib).
+This is an interactive RTx application allows automatic reporting of FT8 messages on Internet with [PSKreporter](https://pskreporter.info/pskmap.html). The initial idea was to allow a small computer like a Raspberry Pi and a RTL-SDR device to send FT8 reports for [VHF/UHF](https://en.wikipedia.org/wiki/Amateur_radio_frequency_allocations#Very_high_frequencies_and_ultra_high_frequencies) bands. This kind of lightweight setup could run continuously without maintenance and help to get additional propagation reports. This code is just a glue between RTL libs and an FT8 open source library based on [Karlis Goba (YL3JG) work](https://github.com/kgoba/ft8_lib).
+
+The Transmitter is based on Si5351 chip for signal generation and related Power Amplification and filtering, the circuit diagram
+is to be added. Interface between RPi and Si5351 goes via I2C by means of WirePi library.
 
 This application written in C does:
 
@@ -48,7 +51,7 @@ This application written in C does:
 - Start the reception using the RTL lib
 - Decimate the IQ data (2.4Msps to 3200 sps)
 - Decode FT8 signals
-- Report any spots on PSKreporter (disable for now!)
+- Report any CQ spots on PSKreporter (thanks to kholia https://github.com/kholia/rtlsdr-ft8d with small adjustment)
 - Repeat, again and again...
 
 
