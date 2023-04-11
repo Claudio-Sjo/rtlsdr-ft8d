@@ -27,6 +27,11 @@ WINDOW *qso, *qso0;
 
 WINDOW *call, *call0;
 
+#define MAXCQ   25
+
+struct decoder_results cqReq[MAXCQ];
+int     cqFirst, cqLast;
+
 int logWLines;
 
 int init_ncurses() {
@@ -88,6 +93,14 @@ int init_ncurses() {
 
     refresh();
 
+    /* Initiate the call's database */
+    for (uint32_t i; i< MAXCQ; i++){    
+        sprintf(cqReq[i].call,"NONE");
+    }
+
+    cqFirst = cqLast = 0;
+
+    /* End initialization */
     return (0);
 }
 
@@ -130,9 +143,26 @@ void *KBDHandler(void *vargp) {
 
         kbd_queue.push_back(key);
 
+/*
+        wprintw(logw, "Key Pressed %d\n",key);
+        wrefresh(logw);
+*/
+
         pthread_mutex_unlock(&KBDlock);  // Protect decodes structure
         usleep(10000); // Wait 10msec
     }
+}
+
+/* A new CQ request has been received, let's add it to the table */
+bool addToCQ(struct decoder_results *dr)
+{
+
+/* Is the caller already in the table? */
+    for (uint32_t i = 0; i < MAXCQ; i++)
+        if (strstr(dr->call,cqReq[i].call) == dr->call)
+            return false; // Found! we don't add anything
+
+    return true;
 }
 
 /* CQ Handler Thread */
@@ -140,18 +170,15 @@ void *CQHandler(void *vargp) {
 
     static bool refresh = false;
 
-    mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
-    wrefresh(logw);
-
     while (true) {
         char key;
+        struct decoder_results dr;
 
         if (cq_queue.size()){
             pthread_mutex_lock(&CQlock);
-            struct decoder_results dr = cq_queue.front();
+            dr = cq_queue.front();
             cq_queue.erase(cq_queue.begin());
             pthread_mutex_unlock(&CQlock);
-
 
             refresh = true;
         }
@@ -163,7 +190,12 @@ void *CQHandler(void *vargp) {
         }
         /* if needed update the screen */
         if (refresh) {
+        wprintw(logw1, "%2ddB  %8dHz %13s\n",
+                dr.snr,
+                dr.freq,
+                dr.call);
 
+        wrefresh(logw1);
         }
 
         refresh = false;

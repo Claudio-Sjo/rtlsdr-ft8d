@@ -47,6 +47,12 @@
 #include "pskreporter.hpp"
 #include "ft8_ncurses.h"
 
+
+/* Defines for debug */
+#define TXWINTEST
+
+/* End defines for debug */
+
 void printSpots(uint32_t n_results);
 
 /* Thread for decoding */
@@ -313,7 +319,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = false;
+    rx_options.noreport = true;     // When debugging no report
     rx_options.qso = true;
 }
 
@@ -482,6 +488,7 @@ void printSpots(uint32_t n_results) {
             return;
         }
     */
+
     mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
     wrefresh(logw);
 
@@ -489,6 +496,8 @@ void printSpots(uint32_t n_results) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
         /* CQlock */
         pthread_mutex_lock(&CQlock);  // Protect decodes structure
+
+#ifndef TXWINTEST
 
         wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
@@ -498,6 +507,9 @@ void printSpots(uint32_t n_results) {
                 dec_results[i].cmd,
                 dec_results[i].call,
                 dec_results[i].loc);
+
+#endif
+
 
         /* Rather than printing the results, we exploit a queue */
         struct decoder_results dr;
@@ -509,8 +521,14 @@ void printSpots(uint32_t n_results) {
 
         pthread_mutex_unlock(&CQlock);  // Protect decodes structure
         pthread_mutex_unlock(&msglock);  // Protect decodes structure
+
     }
-    wrefresh(logw1);
+
+#ifndef TXWINTEST
+        wrefresh(logw1);
+#endif
+
+
 }
 
 void saveSample(float *iSamples, float *qSamples) {
