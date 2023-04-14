@@ -419,7 +419,8 @@ void postSpots(uint32_t n_results) {
     for (uint32_t i = 0; i < n_results && dec_results_queue_index < 2048; i++) {
         struct decoder_results dr;
 
-        strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
         dec_results_queue.push_back(dr);
@@ -514,7 +515,8 @@ void printSpots(uint32_t n_results) {
         /* Rather than printing the results, we exploit a queue */
         struct decoder_results dr;
 
-        strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        //strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
         cq_queue.push_back(dr);

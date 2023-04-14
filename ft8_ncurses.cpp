@@ -30,12 +30,15 @@ WINDOW *call, *call0;
 #define MAXCQ   25
 
 struct decoder_results cqReq[MAXCQ];
-int     cqFirst, cqLast;
+int     cqFirst, cqLast, cqIdx;
 
 int logWLines;
 
 int init_ncurses() {
     initscr();
+
+    /* Hide the cursor */
+    curs_set(0);
 
     /* create subwindow on stdscr */
 
@@ -98,7 +101,7 @@ int init_ncurses() {
         sprintf(cqReq[i].call,"NONE");
     }
 
-    cqFirst = cqLast = 0;
+    cqFirst = cqLast = cqIdx = 0;
 
     /* End initialization */
     return (0);
@@ -153,14 +156,49 @@ void *KBDHandler(void *vargp) {
     }
 }
 
+void printCQ(bool refresh)
+{
+    if (!refresh)
+        return;
+
+    if (cqFirst == cqLast)
+        return;
+
+    /* Reset the cursor position */
+    wmove(logw1, 0, 0);
+    wrefresh(logw1);
+
+    if (cqLast > cqFirst)
+    {
+        for (int i = cqFirst; i < cqLast; i++)
+        {
+            wprintw(logw1, "%2ddB  %8dHz %.13s\n",
+                cqReq[i].snr,
+                cqReq[i].freq,
+                cqReq[i].call);
+        }
+    }
+
+    wrefresh(logw1);
+
+}
+
 /* A new CQ request has been received, let's add it to the table */
 bool addToCQ(struct decoder_results *dr)
 {
 
 /* Is the caller already in the table? */
     for (uint32_t i = 0; i < MAXCQ; i++)
-        if (strstr(dr->call,cqReq[i].call) == dr->call)
+        if (strcmp(dr->call,cqReq[i].call) == 0)
             return false; // Found! we don't add anything
+
+    cqReq[cqLast].freq = dr->freq;
+    cqReq[cqLast].snr = dr->snr;
+    strcpy(cqReq[cqLast].call, dr->call);
+    
+    cqLast = (cqLast +1) % logWLines;
+    if (cqLast == cqFirst)
+        cqFirst = (cqFirst +1) % logWLines;
 
     return true;
 }
@@ -180,7 +218,8 @@ void *CQHandler(void *vargp) {
             cq_queue.erase(cq_queue.begin());
             pthread_mutex_unlock(&CQlock);
 
-            refresh = true;
+            if (addToCQ(&dr))
+                refresh = true;
         }
         if (kbd_queue.size()){
             key = kbd_queue.front();
@@ -189,15 +228,7 @@ void *CQHandler(void *vargp) {
             refresh = true;
         }
         /* if needed update the screen */
-        if (refresh) {
-        wprintw(logw1, "%2ddB  %8dHz %13s\n",
-                dr.snr,
-                dr.freq,
-                dr.call);
-
-        wrefresh(logw1);
-        }
-
+        printCQ(refresh);
         refresh = false;
         usleep(10000); /* Wait 10 msec.*/
     }
