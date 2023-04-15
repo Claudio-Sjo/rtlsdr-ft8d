@@ -15,6 +15,7 @@ extern char rtlsdr_ft8d_version[];
 extern char pskreporter_app_version[];
 extern std::vector<struct decoder_results> cq_queue;
 extern pthread_mutex_t CQlock;
+extern struct decoder_options dec_options;
 
 pthread_mutex_t KBDlock;
 std::vector<char> kbd_queue;
@@ -27,10 +28,13 @@ WINDOW *qso, *qso0;
 
 WINDOW *call, *call0;
 
-#define MAXCQ   25
+#define MAXTXSTRING 40
+#define MAXCQ 25
+
+char txString[MAXTXSTRING];
 
 struct decoder_results cqReq[MAXCQ];
-int     cqFirst, cqLast, cqIdx;
+int cqFirst, cqLast, cqIdx;
 
 int logWLines;
 
@@ -39,6 +43,9 @@ int init_ncurses() {
 
     /* Hide the cursor */
     curs_set(0);
+
+    /* No echo when getting chars */
+    noecho();
 
     /* create subwindow on stdscr */
 
@@ -53,7 +60,7 @@ int init_ncurses() {
     qso0 = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 2, 2);
     qso = subwin(stdscr, (LINES / 2) - 9, COLS - 6, LINES / 2 + 3, 3);
 
-    call0 = subwin(stdscr, 3, COLS - 4, LINES - 5, 2);
+    call0 = subwin(stdscr, 3, COLS - 4, LINES - 6, 2);
     call = subwin(stdscr, 3, COLS - 6, LINES - 5, 3);
 
     start_color();
@@ -97,8 +104,8 @@ int init_ncurses() {
     refresh();
 
     /* Initiate the call's database */
-    for (uint32_t i; i< MAXCQ; i++){    
-        sprintf(cqReq[i].call,"NONE");
+    for (uint32_t i; i < MAXCQ; i++) {
+        sprintf(cqReq[i].call, "NONE");
     }
 
     cqFirst = cqLast = cqIdx = 0;
@@ -135,29 +142,67 @@ int n_printf(bool ncwin, char *prn) {
     return (0);
 }
 
+#define IDLE 0
+#define ESC1 27
+#define ESC2 91
+#define UP 65
+#define DOWN 66
+#define RIGHT 67
+#define LEFT 68
+
 /* KBD Handler Thread */
 void *KBDHandler(void *vargp) {
+    static int status = IDLE;
     while (true) {
         /* CQlock */
 
         char key = wgetch(call);
 
-        pthread_mutex_lock(&KBDlock);  // Protect decodes structure
+        switch (status) {
+            case IDLE:
+                if (key == ESC1)
+                    status = key;
+                    key = 0;
+                break;
+            case ESC1:
+                if (key == ESC2)
+                    status = key;
+                    key = 0;
+                break;
+            case ESC2:
+                if (key == UP) {
+                    if (cqIdx)
+                        cqIdx--;
+                }
+                if (key == DOWN) {
+                    if (cqFirst < cqLast) {
+                        if (cqIdx < (cqLast-1))
+                            cqIdx++;
+                    } else if (cqIdx < logWLines)
+                        cqIdx++;
+                }
+                key = 0;
+                sprintf(txString,"%s %s %s",cqReq[cqIdx].call,dec_options.rcall,dec_options.rloc);
+                wmove(call, 0, 0);
+                wprintw(call,"%s                ",txString);
+                wrefresh(call);
+                break;
 
+            default:
+
+                status = IDLE;
+        }
+
+        // wprintw(logw1, "Key Pressed %d\n", key);
+        // wrefresh(logw1);
+        pthread_mutex_lock(&KBDlock);  // Protect key queue structure
         kbd_queue.push_back(key);
-
-/*
-        wprintw(logw, "Key Pressed %d\n",key);
-        wrefresh(logw);
-*/
-
-        pthread_mutex_unlock(&KBDlock);  // Protect decodes structure
-        usleep(10000); // Wait 10msec
+        pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+        usleep(10000);                   // Wait 10msec
     }
 }
 
-void printCQ(bool refresh)
-{
+void printCQ(bool refresh) {
     if (!refresh)
         return;
 
@@ -168,51 +213,65 @@ void printCQ(bool refresh)
     wmove(logw1, 0, 0);
     wrefresh(logw1);
 
-    if (cqLast > cqFirst)
-    {
-        for (int i = cqFirst; i < cqLast; i++)
-        {
+    if (cqLast > cqFirst) {
+        for (int i = cqFirst; i < cqLast; i++) {
+            if (i == cqIdx)
+                wattrset(logw1, COLOR_PAIR(2) | A_BOLD);
+            else
+                wattrset(logw1, A_NORMAL);
+
             wprintw(logw1, "%2ddB  %8dHz %.13s\n",
-                cqReq[i].snr,
-                cqReq[i].freq,
-                cqReq[i].call);
+                    cqReq[i].snr,
+                    cqReq[i].freq,
+                    cqReq[i].call);
+        }
+    } else {
+        int idx = cqFirst;
+        for (int i = 0; i < logWLines; i++) {
+            if (i == cqIdx)
+                wattrset(logw1, COLOR_PAIR(2) | A_BOLD);
+            else
+                wattrset(logw1, A_NORMAL);
+
+            wprintw(logw1, "%2ddB  %8dHz %.13s\n",
+                    cqReq[idx].snr,
+                    cqReq[idx].freq,
+                    cqReq[idx].call);
+
+            idx = (idx + 1) % logWLines;
         }
     }
-
+    wattrset(logw1, A_NORMAL);
     wrefresh(logw1);
-
 }
 
 /* A new CQ request has been received, let's add it to the table */
-bool addToCQ(struct decoder_results *dr)
-{
-
-/* Is the caller already in the table? */
+bool addToCQ(struct decoder_results *dr) {
+    /* Is the caller already in the table? */
     for (uint32_t i = 0; i < MAXCQ; i++)
-        if (strcmp(dr->call,cqReq[i].call) == 0)
-            return false; // Found! we don't add anything
+        if (strcmp(dr->call, cqReq[i].call) == 0)
+            return false;  // Found! we don't add anything
 
     cqReq[cqLast].freq = dr->freq;
     cqReq[cqLast].snr = dr->snr;
     strcpy(cqReq[cqLast].call, dr->call);
-    
-    cqLast = (cqLast +1) % logWLines;
+
+    cqLast = (cqLast + 1) % logWLines;
     if (cqLast == cqFirst)
-        cqFirst = (cqFirst +1) % logWLines;
+        cqFirst = (cqFirst + 1) % logWLines;
 
     return true;
 }
 
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
-
     static bool refresh = false;
 
     while (true) {
         char key;
         struct decoder_results dr;
 
-        if (cq_queue.size()){
+        if (cq_queue.size()) {
             pthread_mutex_lock(&CQlock);
             dr = cq_queue.front();
             cq_queue.erase(cq_queue.begin());
@@ -221,7 +280,7 @@ void *CQHandler(void *vargp) {
             if (addToCQ(&dr))
                 refresh = true;
         }
-        if (kbd_queue.size()){
+        if (kbd_queue.size()) {
             key = kbd_queue.front();
             kbd_queue.erase(kbd_queue.begin());
 
