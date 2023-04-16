@@ -517,6 +517,7 @@ void printSpots(uint32_t n_results) {
 
         //strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
+        snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
         cq_queue.push_back(dr);
@@ -1044,8 +1045,8 @@ int main(int argc, char **argv) {
     }
 
     if (!rx_options.noreport) {
-        wprintw(qso, "PSK Reporter Initialized!\n");
-        wrefresh(logw);
+        wprintw(logwL, "PSK Reporter Initialized!\n");
+        wrefresh(logwL);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -1071,13 +1072,13 @@ int main(int argc, char **argv) {
     }
 
     if (rx_options.readfile == true) {
-        wprintw(qso, "Reading IQ file: %s\n", rx_options.filename);
+        wprintw(logwL, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
         return exit_ft8(rx_options.qso, EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
-        wprintw(qso, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
+        wprintw(logwL, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
     }
 
     /* If something goes wrong... */
@@ -1091,30 +1092,30 @@ int main(int argc, char **argv) {
     /* Init & parameter the device */
     rtl_count = rtlsdr_get_device_count();
     if (!rtl_count) {
-        wprintw(qso, "No supported devices found\n");
-        wrefresh(qso);
+        wprintw(logwL, "No supported devices found\n");
+        wrefresh(logwL);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
-    wprintw(qso, "Found %d device(s):\n", rtl_count);
+    wprintw(logwL, "Found %d device(s):\n", rtl_count);
     for (uint32_t i = 0; i < rtl_count; i++) {
         rtlsdr_get_device_usb_strings(i, rtl_vendor, rtl_product, rtl_serial);
-        wprintw(qso, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
+        wprintw(logwL, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
     }
 
-    wprintw(qso, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
-    wrefresh(qso);
+    wprintw(logwL, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
+    wrefresh(logwL);
 
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
+        wprintw(logwL, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     if (rx_options.directsampling) {
         rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
         if (rtl_result < 0) {
-            wprintw(qso, "ERROR: Failed to set direct sampling\n");
+            wprintw(logwL, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1122,14 +1123,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to set sample rate\n");
+        wprintw(logwL, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to enable manual gain\n");
+        wprintw(logwL, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1137,14 +1138,14 @@ int main(int argc, char **argv) {
     if (rx_options.autogain) {
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
         if (rtl_result != 0) {
-            wprintw(qso, "ERROR: Failed to set tuner gain\n");
+            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
-            wprintw(qso, "ERROR: Failed to set tuner gain\n");
+            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1153,7 +1154,7 @@ int main(int argc, char **argv) {
     if (rx_options.ppm != 0) {
         rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
         if (rtl_result < 0) {
-            wprintw(qso, "ERROR: Failed to set ppm error\n");
+            wprintw(logwL, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1161,14 +1162,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to set frequency\n");
+        wprintw(logwL, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to reset buffers.\n");
+        wprintw(logwL, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1180,25 +1181,25 @@ int main(int argc, char **argv) {
     struct tm *gtm = gmtime(&rawtime);
 
     /* Print used parameter */
-    wprintw(qso, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
+    wprintw(logwL, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
             gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
-    wprintw(qso, "  Callsign     : %s\n", dec_options.rcall);
-    wprintw(qso, "  Locator      : %s\n", dec_options.rloc);
-    wprintw(qso, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
-    wprintw(qso, "  Real freq.   : %d Hz\n", rx_options.realfreq);
-    wprintw(qso, "  PPM factor   : %d\n", rx_options.ppm);
+    wprintw(logwL, "  Callsign     : %s\n", dec_options.rcall);
+    wprintw(logwL, "  Locator      : %s\n", dec_options.rloc);
+    wprintw(logwL, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
+    wprintw(logwL, "  Real freq.   : %d Hz\n", rx_options.realfreq);
+    wprintw(logwL, "  PPM factor   : %d\n", rx_options.ppm);
     if (rx_options.autogain)
-        wprintw(qso, "  Auto gain    : enable\n");
+        wprintw(logwL, "  Auto gain    : enable\n");
     else
-        wprintw(qso, "  Gain         : %d dB\n", rx_options.gain / 10);
+        wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = 15000000 - usec;
-    wprintw(qso, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
-    wrefresh(qso);
+    wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wrefresh(logwL);
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
@@ -1256,7 +1257,7 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    wprintw(qso, "Bye!\n");
+    wprintw(logwL, "Bye!\n");
 
     return exit_ft8(rx_options.qso, EXIT_SUCCESS);
 }
@@ -1387,15 +1388,15 @@ void ft8_subsystem(float *iSamples,
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            wattrset(qso, A_NORMAL);
+            wattrset(logwL, A_NORMAL);
 
             if (strstr(message.text, "CQ ") == message.text) {
-                wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
+                wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
             }
 
-            wprintw(qso, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
+            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
 
-            wrefresh(qso);
+            wrefresh(logwL);
 
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages

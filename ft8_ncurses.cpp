@@ -22,7 +22,7 @@ std::vector<char> kbd_queue;
 
 WINDOW *root;
 
-WINDOW *logw, *logw0, *logw1;
+WINDOW *logw, *logw0, *logwL, *logwR;
 
 WINDOW *qso, *qso0;
 
@@ -53,7 +53,8 @@ int init_ncurses() {
 
     logw0 = subwin(stdscr, LINES / 2, COLS - 4, 2, 2);
     logw = subwin(stdscr, (LINES / 2) - 2, COLS - 6, 2, 3);
-    logw1 = subwin(stdscr, (LINES / 2) - 3, COLS - 6, 4, 3);
+    logwL = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
+    logwR = subwin(stdscr, (LINES / 2) - 3, (COLS / 2) - 6, 4, COLS / 2);
 
     logWLines = (LINES / 2) - 3;
 
@@ -91,15 +92,16 @@ int init_ncurses() {
     mvwprintw(root, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), rtlsdr_ft8d_version);
 
     wattrset(logw, A_NORMAL);
-    wattrset(logw1, A_NORMAL);
+    wattrset(logwL, A_NORMAL);
+    wattrset(logwR, A_NORMAL);
     wattrset(qso, A_NORMAL);
     wattrset(call, A_NORMAL);
 
-    scrollok(qso, true);
-    idlok(qso, true);
+    scrollok(logwL, true);
+    idlok(logwL, true);
 
-    scrollok(logw1, true);
-    idlok(logw1, true);
+    scrollok(logwL, true);
+    idlok(logwL, true);
 
     refresh();
 
@@ -162,12 +164,12 @@ void *KBDHandler(void *vargp) {
             case IDLE:
                 if (key == ESC1)
                     status = key;
-                    key = 0;
+                key = 0;
                 break;
             case ESC1:
                 if (key == ESC2)
                     status = key;
-                    key = 0;
+                key = 0;
                 break;
             case ESC2:
                 if (key == UP) {
@@ -176,15 +178,15 @@ void *KBDHandler(void *vargp) {
                 }
                 if (key == DOWN) {
                     if (cqFirst < cqLast) {
-                        if (cqIdx < (cqLast-1))
+                        if (cqIdx < (cqLast - 1))
                             cqIdx++;
                     } else if (cqIdx < logWLines)
                         cqIdx++;
                 }
                 key = 0;
-                sprintf(txString,"%s %s %s",cqReq[cqIdx].call,dec_options.rcall,dec_options.rloc);
+                sprintf(txString, "%s %s %s", cqReq[(cqIdx+cqFirst)%logWLines].call, dec_options.rcall, dec_options.rloc);
                 wmove(call, 0, 0);
-                wprintw(call,"%s                ",txString);
+                wprintw(call, "%s                ", txString);
                 wrefresh(call);
                 break;
 
@@ -193,8 +195,8 @@ void *KBDHandler(void *vargp) {
                 status = IDLE;
         }
 
-        // wprintw(logw1, "Key Pressed %d\n", key);
-        // wrefresh(logw1);
+        // wprintw(logwL, "Key Pressed %d\n", key);
+        // wrefresh(logwL);
         pthread_mutex_lock(&KBDlock);  // Protect key queue structure
         kbd_queue.push_back(key);
         pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
@@ -210,39 +212,41 @@ void printCQ(bool refresh) {
         return;
 
     /* Reset the cursor position */
-    wmove(logw1, 0, 0);
-    wrefresh(logw1);
+    wmove(logwR, 0, 0);
+    wrefresh(logwR);
 
     if (cqLast > cqFirst) {
         for (int i = cqFirst; i < cqLast; i++) {
             if (i == cqIdx)
-                wattrset(logw1, COLOR_PAIR(2) | A_BOLD);
+                wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
             else
-                wattrset(logw1, A_NORMAL);
+                wattrset(logwR, A_NORMAL);
 
-            wprintw(logw1, "%2ddB  %8dHz %.13s\n",
-                    cqReq[i].snr,
+            wprintw(logwR, "%.6s DE  %.13s @ %8dHz %2ddB SNR\n",
+                    cqReq[i].cmd,
+                    cqReq[i].call,
                     cqReq[i].freq,
-                    cqReq[i].call);
+                    cqReq[i].snr);
         }
     } else {
         int idx = cqFirst;
         for (int i = 0; i < logWLines; i++) {
             if (i == cqIdx)
-                wattrset(logw1, COLOR_PAIR(2) | A_BOLD);
+                wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
             else
-                wattrset(logw1, A_NORMAL);
+                wattrset(logwR, A_NORMAL);
 
-            wprintw(logw1, "%2ddB  %8dHz %.13s\n",
-                    cqReq[idx].snr,
-                    cqReq[idx].freq,
-                    cqReq[idx].call);
+            wprintw(logwR, "%.6s DE  %.13s @ %8dHz %2ddB SNR\n",
+                    cqReq[i].cmd,
+                    cqReq[i].call,
+                    cqReq[i].freq,
+                    cqReq[i].snr);
 
             idx = (idx + 1) % logWLines;
         }
     }
-    wattrset(logw1, A_NORMAL);
-    wrefresh(logw1);
+    wattrset(logwR, A_NORMAL);
+    wrefresh(logwR);
 }
 
 /* A new CQ request has been received, let's add it to the table */

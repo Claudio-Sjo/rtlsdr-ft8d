@@ -8,7 +8,8 @@ int n_printf (bool ncwin, char *prn);
 int exit_ft8(bool qsomode,int status);
 
 extern WINDOW *logw;
-extern WINDOW *logw1;
+extern WINDOW *logwR;
+extern WINDOW *logwL;
 
 extern WINDOW *qso;
 
