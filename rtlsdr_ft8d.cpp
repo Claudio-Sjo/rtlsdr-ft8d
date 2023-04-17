@@ -320,7 +320,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = true;  // When debugging no report
+    rx_options.noreport = false;  // When debugging no report
     rx_options.qso = true;
 }
 

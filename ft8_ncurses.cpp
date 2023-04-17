@@ -275,7 +275,7 @@ bool addToCQ(struct decoder_results *dr) {
 
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
-    static bool refresh = false;
+    static bool termRefresh = false;
 
     while (true) {
         char key;
@@ -289,7 +289,7 @@ void *CQHandler(void *vargp) {
             pthread_mutex_unlock(&CQlock);
 
             if (addToCQ(&dr))
-                refresh = true;
+                termRefresh = true;
         }
         if (kbd_queue.size()) {
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
@@ -298,7 +298,7 @@ void *CQHandler(void *vargp) {
             kbd_queue.erase(kbd_queue.begin());
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
 
-            refresh = true;
+            termRefresh = true;
         }
         if (qso_queue.size()) {
             pthread_mutex_lock(&QSOlock);
@@ -312,11 +312,13 @@ void *CQHandler(void *vargp) {
             wprintw(qso, "%s\n", qsoMsg.message);
             wattrset(qso, A_NORMAL);
             wrefresh(qso);
-            refresh = true;
+            termRefresh = true;
         }
         /* if needed update the screen */
-        printCQ(refresh);
-        refresh = false;
+        printCQ(termRefresh);
+        if (termRefresh)
+            refresh();
+        termRefresh = false;
         usleep(10000); /* Wait 10 msec.*/
     }
 }
