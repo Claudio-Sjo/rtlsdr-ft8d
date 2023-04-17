@@ -49,7 +49,7 @@
 
 
 /* Defines for debug */
-#define TXWINTEST
+// #define TXWINTEST
 
 /* End defines for debug */
 
@@ -498,9 +498,9 @@ void printSpots(uint32_t n_results) {
         /* CQlock */
         pthread_mutex_lock(&CQlock);  // Protect decodes structure
 
-#ifndef TXWINTEST
+#ifdef TXWINTEST
 
-        wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+        wprintw(logwL, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
                 rx_state.gtm->tm_min,
                 dec_results[i].snr,
@@ -527,8 +527,8 @@ void printSpots(uint32_t n_results) {
 
     }
 
-#ifndef TXWINTEST
-        wrefresh(logw1);
+#ifdef TXWINTEST
+        wrefresh(logwL);
 #endif
 
 
@@ -1401,14 +1401,17 @@ void ft8_subsystem(float *iSamples,
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
+                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
+
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
 
-                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
-                if (strlen(strPtr) == 2) {
-                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
+                sprintf(decodes[num_decoded].cmd, "CQ   ");
+                if (!strncmp(strPtr, "DX", 2))
+                {
+                    sprintf(decodes[num_decoded].cmd, "CQ DX");
                     strPtr = strtok(NULL, " ");  // Move on the Callsign part
-                } else
-                    sprintf(decodes[num_decoded].cmd, "CQ   ");
+                }
+
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);

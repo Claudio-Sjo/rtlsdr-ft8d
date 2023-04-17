@@ -184,7 +184,7 @@ void *KBDHandler(void *vargp) {
                         cqIdx++;
                 }
                 key = 0;
-                sprintf(txString, "%s %s %s", cqReq[(cqIdx+cqFirst)%logWLines].call, dec_options.rcall, dec_options.rloc);
+                sprintf(txString, "%s %s %s %s", cqReq[(cqIdx+cqFirst)%logWLines].cmd, cqReq[(cqIdx+cqFirst)%logWLines].call, dec_options.rcall, dec_options.rloc);
                 wmove(call, 0, 0);
                 wprintw(call, "%s                ", txString);
                 wrefresh(call);
@@ -222,11 +222,11 @@ void printCQ(bool refresh) {
             else
                 wattrset(logwR, A_NORMAL);
 
-            wprintw(logwR, "%.6s DE  %.13s @ %8dHz %2ddB SNR\n",
-                    cqReq[i].cmd,
-                    cqReq[i].call,
-                    cqReq[i].freq,
-                    cqReq[i].snr);
+            wprintw(logwR, "%.6s DE  %.13s freq. %8dHz %2ddB\n",
+                    cqReq[(i)%logWLines].cmd,
+                    cqReq[(i)%logWLines].call,
+                    cqReq[(i)%logWLines].freq,
+                    cqReq[(i)%logWLines].snr);
         }
     } else {
         int idx = cqFirst;
@@ -236,11 +236,11 @@ void printCQ(bool refresh) {
             else
                 wattrset(logwR, A_NORMAL);
 
-            wprintw(logwR, "%.6s DE  %.13s @ %8dHz %2ddB SNR\n",
-                    cqReq[i].cmd,
-                    cqReq[i].call,
-                    cqReq[i].freq,
-                    cqReq[i].snr);
+            wprintw(logwR, "%.6s DE  %.13s freq. %8dHz %2ddB\n",
+                    cqReq[i+cqFirst].cmd,
+                    cqReq[i+cqFirst].call,
+                    cqReq[i+cqFirst].freq,
+                    cqReq[i+cqFirst].snr);
 
             idx = (idx + 1) % logWLines;
         }
@@ -258,6 +258,7 @@ bool addToCQ(struct decoder_results *dr) {
 
     cqReq[cqLast].freq = dr->freq;
     cqReq[cqLast].snr = dr->snr;
+    strcpy(cqReq[cqLast].cmd, dr->cmd);
     strcpy(cqReq[cqLast].call, dr->call);
 
     cqLast = (cqLast + 1) % logWLines;
