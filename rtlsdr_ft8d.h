@@ -136,6 +136,9 @@ struct decoder_results {
     int32_t  snr;
 };
 
+struct plain_message {
+    char message[40];
+};
 
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);
 static void *rtlsdr_rx(void *arg);

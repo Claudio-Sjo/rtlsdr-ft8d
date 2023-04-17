@@ -14,7 +14,9 @@
 extern char rtlsdr_ft8d_version[];
 extern char pskreporter_app_version[];
 extern std::vector<struct decoder_results> cq_queue;
+extern std::vector<struct plain_message> qso_queue;
 extern pthread_mutex_t CQlock;
+extern pthread_mutex_t QSOlock;
 extern struct decoder_options dec_options;
 
 pthread_mutex_t KBDlock;
@@ -103,6 +105,9 @@ int init_ncurses() {
     scrollok(logwL, true);
     idlok(logwL, true);
 
+    scrollok(qso, true);
+    idlok(qso, true);
+
     refresh();
 
     /* Initiate the call's database */
@@ -180,11 +185,11 @@ void *KBDHandler(void *vargp) {
                     if (cqFirst < cqLast) {
                         if (cqIdx < (cqLast - 1))
                             cqIdx++;
-                    } else if (cqIdx < logWLines)
+                    } else if (cqIdx < (logWLines - 1))
                         cqIdx++;
                 }
                 key = 0;
-                sprintf(txString, "%s %s %s %s", cqReq[(cqIdx+cqFirst)%logWLines].cmd, cqReq[(cqIdx+cqFirst)%logWLines].call, dec_options.rcall, dec_options.rloc);
+                sprintf(txString, "%s %s %s", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
                 wmove(call, 0, 0);
                 wprintw(call, "%s                ", txString);
                 wrefresh(call);
@@ -222,11 +227,11 @@ void printCQ(bool refresh) {
             else
                 wattrset(logwR, A_NORMAL);
 
-            wprintw(logwR, "%.6s DE  %.13s freq. %8dHz %2ddB\n",
-                    cqReq[(i)%logWLines].cmd,
-                    cqReq[(i)%logWLines].call,
-                    cqReq[(i)%logWLines].freq,
-                    cqReq[(i)%logWLines].snr);
+            wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
+                    cqReq[i].cmd,
+                    cqReq[i].call,
+                    cqReq[i].freq,
+                    cqReq[i].snr);
         }
     } else {
         int idx = cqFirst;
@@ -236,11 +241,11 @@ void printCQ(bool refresh) {
             else
                 wattrset(logwR, A_NORMAL);
 
-            wprintw(logwR, "%.6s DE  %.13s freq. %8dHz %2ddB\n",
-                    cqReq[i+cqFirst].cmd,
-                    cqReq[i+cqFirst].call,
-                    cqReq[i+cqFirst].freq,
-                    cqReq[i+cqFirst].snr);
+            wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
+                    cqReq[(i + cqFirst) % logWLines].cmd,
+                    cqReq[(i + cqFirst) % logWLines].call,
+                    cqReq[(i + cqFirst) % logWLines].freq,
+                    cqReq[(i + cqFirst) % logWLines].snr);
 
             idx = (idx + 1) % logWLines;
         }
@@ -252,7 +257,7 @@ void printCQ(bool refresh) {
 /* A new CQ request has been received, let's add it to the table */
 bool addToCQ(struct decoder_results *dr) {
     /* Is the caller already in the table? */
-    for (uint32_t i = 0; i < MAXCQ; i++)
+    for (uint32_t i = 0; i < logWLines; i++)
         if (strcmp(dr->call, cqReq[i].call) == 0)
             return false;  // Found! we don't add anything
 
@@ -275,6 +280,7 @@ void *CQHandler(void *vargp) {
     while (true) {
         char key;
         struct decoder_results dr;
+        struct plain_message qsoMsg;
 
         if (cq_queue.size()) {
             pthread_mutex_lock(&CQlock);
@@ -286,9 +292,26 @@ void *CQHandler(void *vargp) {
                 refresh = true;
         }
         if (kbd_queue.size()) {
+            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
+
             key = kbd_queue.front();
             kbd_queue.erase(kbd_queue.begin());
+            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
 
+            refresh = true;
+        }
+        if (qso_queue.size()) {
+            pthread_mutex_lock(&QSOlock);
+
+            qsoMsg = qso_queue.front();
+            qso_queue.erase(qso_queue.begin());
+            pthread_mutex_unlock(&QSOlock);
+
+            wattrset(qso, COLOR_PAIR(3) | A_BOLD);
+
+            wprintw(qso, "%s\n", qsoMsg.message);
+            wattrset(qso, A_NORMAL);
+            wrefresh(qso);
             refresh = true;
         }
         /* if needed update the screen */

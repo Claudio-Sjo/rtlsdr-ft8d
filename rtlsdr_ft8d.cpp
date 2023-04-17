@@ -47,7 +47,6 @@
 #include "pskreporter.hpp"
 #include "ft8_ncurses.h"
 
-
 /* Defines for debug */
 // #define TXWINTEST
 
@@ -79,12 +78,14 @@ struct decoder_options dec_options;
 struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
 vector<struct decoder_results> cq_queue;
+vector<struct plain_message> qso_queue;
 int dec_results_queue_index = 0;
 
 /* mutex for thread sync */
-pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;;
+pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;
+;
 pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
-
+pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
 char rtlsdr_ft8d_version[] = "0.3.8a";
@@ -319,7 +320,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = true;     // When debugging no report
+    rx_options.noreport = true;  // When debugging no report
     rx_options.qso = true;
 }
 
@@ -511,27 +512,23 @@ void printSpots(uint32_t n_results) {
 
 #endif
 
-
         /* Rather than printing the results, we exploit a queue */
         struct decoder_results dr;
 
-        //strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
         cq_queue.push_back(dr);
 
-        pthread_mutex_unlock(&CQlock);  // Protect decodes structure
+        pthread_mutex_unlock(&CQlock);   // Protect decodes structure
         pthread_mutex_unlock(&msglock);  // Protect decodes structure
-
     }
 
 #ifdef TXWINTEST
-        wrefresh(logwL);
+    wrefresh(logwL);
 #endif
-
-
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -1385,18 +1382,18 @@ void ft8_subsystem(float *iSamples,
 
         /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
+            char msgToPrint[32];
+
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
+
+            snprintf(msgToPrint, sizeof(msgToPrint), "%s", message.text);
 
             wattrset(logwL, A_NORMAL);
 
             if (strstr(message.text, "CQ ") == message.text) {
                 wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
             }
-
-            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
-
-            wrefresh(logwL);
 
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
@@ -1406,8 +1403,7 @@ void ft8_subsystem(float *iSamples,
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
 
                 sprintf(decodes[num_decoded].cmd, "CQ   ");
-                if (!strncmp(strPtr, "DX", 2))
-                {
+                if (!strncmp(strPtr, "DX", 2)) {
                     sprintf(decodes[num_decoded].cmd, "CQ DX");
                     strPtr = strtok(NULL, " ");  // Move on the Callsign part
                 }
@@ -1422,7 +1418,21 @@ void ft8_subsystem(float *iSamples,
                 pthread_mutex_unlock(&msglock);
 
                 num_decoded++;
+            } else {
+                if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
+                    struct plain_message qsoMsg;
+
+                    wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+                    pthread_mutex_lock(&QSOlock);             // Protect decodes structure
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msgToPrint);
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                }
             }
+
+            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, msgToPrint);
+
+            wrefresh(logwL);
         }
     }
     *n_results = num_decoded;
