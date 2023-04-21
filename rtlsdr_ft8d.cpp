@@ -47,6 +47,11 @@
 #include "pskreporter.hpp"
 #include "ft8_ncurses.h"
 
+/* Defines for debug */
+// #define TXWINTEST
+
+/* End defines for debug */
+
 void printSpots(uint32_t n_results);
 
 /* Thread for decoding */
@@ -72,14 +77,19 @@ struct receiver_options rx_options;
 struct decoder_options dec_options;
 struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
+vector<struct decoder_results> cq_queue;
+vector<struct plain_message> qso_queue;
 int dec_results_queue_index = 0;
 
 /* mutex for thread sync */
-pthread_mutex_t msglock;
+pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;
+;
+pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-char rtlsdr_ft8d_version[] = "0.3.7";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.7";
+char rtlsdr_ft8d_version[] = "0.3.8a";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8a";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -310,7 +320,7 @@ void initrx_options() {
     rx_options.selftest = false;
     rx_options.writefile = false;
     rx_options.readfile = false;
-    rx_options.noreport = false;
+    rx_options.noreport = false;  // When debugging no report
     rx_options.qso = true;
 }
 
@@ -410,7 +420,8 @@ void postSpots(uint32_t n_results) {
     for (uint32_t i = 0; i < n_results && dec_results_queue_index < 2048; i++) {
         struct decoder_results dr;
 
-        strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
         dec_results_queue.push_back(dr);
@@ -479,13 +490,18 @@ void printSpots(uint32_t n_results) {
             return;
         }
     */
+
     mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
     wrefresh(logw);
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
+        /* CQlock */
+        pthread_mutex_lock(&CQlock);  // Protect decodes structure
 
-        wprintw(logw1, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+#ifdef TXWINTEST
+
+        wprintw(logwL, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
                 rx_state.gtm->tm_min,
                 dec_results[i].snr,
@@ -494,9 +510,25 @@ void printSpots(uint32_t n_results) {
                 dec_results[i].call,
                 dec_results[i].loc);
 
+#endif
+
+        /* Rather than printing the results, we exploit a queue */
+        struct decoder_results dr;
+
+        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
+        snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
+        snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
+        dr.freq = dec_results[i].freq + dec_options.freq;
+        dr.snr = dec_results[i].snr - 20;
+        cq_queue.push_back(dr);
+
+        pthread_mutex_unlock(&CQlock);   // Protect decodes structure
         pthread_mutex_unlock(&msglock);  // Protect decodes structure
     }
-    wrefresh(logw1);
+
+#ifdef TXWINTEST
+    wrefresh(logwL);
+#endif
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -1010,8 +1042,8 @@ int main(int argc, char **argv) {
     }
 
     if (!rx_options.noreport) {
-        wprintw(qso, "PSK Reporter Initialized!\n");
-        wrefresh(logw);
+        wprintw(logwL, "PSK Reporter Initialized!\n");
+        wrefresh(logwL);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -1037,13 +1069,13 @@ int main(int argc, char **argv) {
     }
 
     if (rx_options.readfile == true) {
-        wprintw(qso, "Reading IQ file: %s\n", rx_options.filename);
+        wprintw(logwL, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
         return exit_ft8(rx_options.qso, EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
-        wprintw(qso, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
+        wprintw(logwL, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
     }
 
     /* If something goes wrong... */
@@ -1057,30 +1089,30 @@ int main(int argc, char **argv) {
     /* Init & parameter the device */
     rtl_count = rtlsdr_get_device_count();
     if (!rtl_count) {
-        wprintw(qso, "No supported devices found\n");
-        wrefresh(qso);
+        wprintw(logwL, "No supported devices found\n");
+        wrefresh(logwL);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
-    wprintw(qso, "Found %d device(s):\n", rtl_count);
+    wprintw(logwL, "Found %d device(s):\n", rtl_count);
     for (uint32_t i = 0; i < rtl_count; i++) {
         rtlsdr_get_device_usb_strings(i, rtl_vendor, rtl_product, rtl_serial);
-        wprintw(qso, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
+        wprintw(logwL, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
     }
 
-    wprintw(qso, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
-    wrefresh(qso);
+    wprintw(logwL, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
+    wrefresh(logwL);
 
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
+        wprintw(logwL, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     if (rx_options.directsampling) {
         rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
         if (rtl_result < 0) {
-            wprintw(qso, "ERROR: Failed to set direct sampling\n");
+            wprintw(logwL, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1088,14 +1120,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to set sample rate\n");
+        wprintw(logwL, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to enable manual gain\n");
+        wprintw(logwL, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1103,14 +1135,14 @@ int main(int argc, char **argv) {
     if (rx_options.autogain) {
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
         if (rtl_result != 0) {
-            wprintw(qso, "ERROR: Failed to set tuner gain\n");
+            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
-            wprintw(qso, "ERROR: Failed to set tuner gain\n");
+            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1119,7 +1151,7 @@ int main(int argc, char **argv) {
     if (rx_options.ppm != 0) {
         rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
         if (rtl_result < 0) {
-            wprintw(qso, "ERROR: Failed to set ppm error\n");
+            wprintw(logwL, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1127,14 +1159,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to set frequency\n");
+        wprintw(logwL, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
-        wprintw(qso, "ERROR: Failed to reset buffers.\n");
+        wprintw(logwL, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1146,25 +1178,25 @@ int main(int argc, char **argv) {
     struct tm *gtm = gmtime(&rawtime);
 
     /* Print used parameter */
-    wprintw(qso, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
+    wprintw(logwL, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
             gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
-    wprintw(qso, "  Callsign     : %s\n", dec_options.rcall);
-    wprintw(qso, "  Locator      : %s\n", dec_options.rloc);
-    wprintw(qso, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
-    wprintw(qso, "  Real freq.   : %d Hz\n", rx_options.realfreq);
-    wprintw(qso, "  PPM factor   : %d\n", rx_options.ppm);
+    wprintw(logwL, "  Callsign     : %s\n", dec_options.rcall);
+    wprintw(logwL, "  Locator      : %s\n", dec_options.rloc);
+    wprintw(logwL, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
+    wprintw(logwL, "  Real freq.   : %d Hz\n", rx_options.realfreq);
+    wprintw(logwL, "  PPM factor   : %d\n", rx_options.ppm);
     if (rx_options.autogain)
-        wprintw(qso, "  Auto gain    : enable\n");
+        wprintw(logwL, "  Auto gain    : enable\n");
     else
-        wprintw(qso, "  Gain         : %d dB\n", rx_options.gain / 10);
+        wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = 15000000 - usec;
-    wprintw(qso, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
-    wrefresh(qso);
+    wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wrefresh(logwL);
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
@@ -1182,6 +1214,8 @@ int main(int argc, char **argv) {
     pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
     pthread_create(&spottingThread, NULL, pskUploader, NULL);
+    pthread_create(&spottingThread, NULL, CQHandler, NULL);
+    pthread_create(&spottingThread, NULL, KBDHandler, NULL);
 
     /* Main loop : Wait, read, decode */
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
@@ -1220,7 +1254,7 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    wprintw(qso, "Bye!\n");
+    wprintw(logwL, "Bye!\n");
 
     return exit_ft8(rx_options.qso, EXIT_SUCCESS);
 }
@@ -1348,30 +1382,32 @@ void ft8_subsystem(float *iSamples,
 
         /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
+            char msgToPrint[32];
+
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            wattrset(qso, A_NORMAL);
+            snprintf(msgToPrint, sizeof(msgToPrint), "%s", message.text);
+
+            wattrset(logwL, A_NORMAL);
 
             if (strstr(message.text, "CQ ") == message.text) {
-                wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
+                wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
             }
-
-            wprintw(qso, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, message.text);
-
-            wrefresh(qso);
 
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
+                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
+
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
 
-                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
-                if (strlen(strPtr) == 2) {
-                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
+                sprintf(decodes[num_decoded].cmd, "CQ   ");
+                if (!strncmp(strPtr, "DX", 2)) {
+                    sprintf(decodes[num_decoded].cmd, "CQ DX");
                     strPtr = strtok(NULL, " ");  // Move on the Callsign part
-                } else
-                    sprintf(decodes[num_decoded].cmd, "CQ   ");
+                }
+
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
@@ -1382,7 +1418,21 @@ void ft8_subsystem(float *iSamples,
                 pthread_mutex_unlock(&msglock);
 
                 num_decoded++;
+            } else {
+                if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
+                    struct plain_message qsoMsg;
+
+                    wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+                    pthread_mutex_lock(&QSOlock);             // Protect decodes structure
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msgToPrint);
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                }
             }
+
+            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, msgToPrint);
+
+            wrefresh(logwL);
         }
     }
     *n_results = num_decoded;
