@@ -33,6 +33,12 @@ WINDOW *call, *call0;
 #define MAXTXSTRING 40
 #define MAXCQ 25
 
+#define CQWIN 0
+#define QSOWIN 1
+#define TXWIN 2
+
+int activeWin = CQWIN;
+
 char txString[MAXTXSTRING];
 
 struct decoder_results cqReq[MAXCQ];
@@ -71,6 +77,10 @@ int init_ncurses() {
     init_pair(2, COLOR_RED, COLOR_BLACK);
     init_pair(3, COLOR_GREEN, COLOR_BLACK);
     init_pair(4, COLOR_CYAN, COLOR_BLACK);
+    init_pair(11, COLOR_YELLOW, COLOR_RED);
+    init_pair(12, COLOR_BLACK, COLOR_RED);
+    init_pair(13, COLOR_BLACK, COLOR_GREEN);
+    init_pair(14, COLOR_BLACK, COLOR_CYAN);
 
     attrset(COLOR_PAIR(1) | A_BOLD);
     wattrset(logw0, COLOR_PAIR(3) | A_BOLD);
@@ -167,9 +177,18 @@ void *KBDHandler(void *vargp) {
 
         switch (status) {
             case IDLE:
-                if (key == ESC1)
+                if (key == ESC1) {
                     status = key;
-                key = 0;
+                    key = 0;
+
+                } else {
+                    if (key == 9) {
+                        if (activeWin > TXWIN)
+                            activeWin = CQWIN;
+                        key = 0;
+                    }
+                }
+
                 break;
             case ESC1:
                 if (key == ESC2)
@@ -177,22 +196,24 @@ void *KBDHandler(void *vargp) {
                 key = 0;
                 break;
             case ESC2:
-                if (key == UP) {
-                    if (cqIdx)
-                        cqIdx--;
-                }
-                if (key == DOWN) {
-                    if (cqFirst < cqLast) {
-                        if (cqIdx < (cqLast - 1))
+                if (activeWin == CQWIN) {
+                    if (key == UP) {
+                        if (cqIdx)
+                            cqIdx--;
+                    }
+                    if (key == DOWN) {
+                        if (cqFirst < cqLast) {
+                            if (cqIdx < (cqLast - 1))
+                                cqIdx++;
+                        } else if (cqIdx < (logWLines - 1))
                             cqIdx++;
-                    } else if (cqIdx < (logWLines - 1))
-                        cqIdx++;
+                    }
+                    key = 0;
+                    sprintf(txString, "%s %s %s", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+                    wmove(call, 0, 0);
+                    wprintw(call, "%s                ", txString);
+                    wrefresh(call);
                 }
-                key = 0;
-                sprintf(txString, "%s %s %s", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
-                wmove(call, 0, 0);
-                wprintw(call, "%s                ", txString);
-                wrefresh(call);
                 break;
 
             default:
@@ -222,9 +243,12 @@ void printCQ(bool refresh) {
 
     if (cqLast > cqFirst) {
         for (int i = cqFirst; i < cqLast; i++) {
-            if (i == cqIdx)
-                wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
-            else
+            if (i == cqIdx) {
+                if (activeWin == CQWIN)
+                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                else
+                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+            } else
                 wattrset(logwR, A_NORMAL);
 
             wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
@@ -236,9 +260,12 @@ void printCQ(bool refresh) {
     } else {
         int idx = cqFirst;
         for (int i = 0; i < logWLines; i++) {
-            if (i == cqIdx)
-                wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
-            else
+            if (i == cqIdx) {
+                if (activeWin == CQWIN)
+                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                else
+                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+            } else
                 wattrset(logwR, A_NORMAL);
 
             wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
@@ -293,7 +320,6 @@ void *CQHandler(void *vargp) {
         }
         if (kbd_queue.size()) {
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-
             key = kbd_queue.front();
             kbd_queue.erase(kbd_queue.begin());
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
@@ -307,7 +333,10 @@ void *CQHandler(void *vargp) {
             qso_queue.erase(qso_queue.begin());
             pthread_mutex_unlock(&QSOlock);
 
-            wattrset(qso, COLOR_PAIR(3) | A_BOLD);
+            if (activeWin == QSOWIN)
+                wattrset(logwR, COLOR_PAIR(13) | A_BOLD);
+            else
+                wattrset(logwR, COLOR_PAIR(3) | A_BOLD);
 
             wprintw(qso, "%s\n", qsoMsg.message);
             wattrset(qso, A_NORMAL);
