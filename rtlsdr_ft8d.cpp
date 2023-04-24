@@ -88,8 +88,8 @@ pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-char rtlsdr_ft8d_version[] = "0.3.8a";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8a";
+char rtlsdr_ft8d_version[] = "0.3.8b";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8b";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -491,8 +491,8 @@ void printSpots(uint32_t n_results) {
         }
     */
 
-    mvwprintw(logw, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
-    wrefresh(logw);
+    mvwprintw(logwL, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
+    wrefresh(logwL);
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
@@ -501,7 +501,7 @@ void printSpots(uint32_t n_results) {
 
 #ifdef TXWINTEST
 
-        wprintw(logwL, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+        wprintw(logwLL, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
                 rx_state.gtm->tm_min,
                 dec_results[i].snr,
@@ -527,7 +527,7 @@ void printSpots(uint32_t n_results) {
     }
 
 #ifdef TXWINTEST
-    wrefresh(logwL);
+    wrefresh(logwLL);
 #endif
 }
 
@@ -785,7 +785,7 @@ int32_t decoderSelfTest() {
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
-        wprintw(logw, "Cannot parse message!\n");
+        wprintw(logwL, "Cannot parse message!\n");
         return 0;
     }
 
@@ -1058,12 +1058,12 @@ int main(int argc, char **argv) {
 
     if (rx_options.selftest == true) {
         if (decoderSelfTest()) {
-            wprintw(logw, "Self-test SUCCESS!\n");
-            wrefresh(logw);
+            wprintw(logwL, "Self-test SUCCESS!\n");
+            wrefresh(logwL);
             return exit_ft8(rx_options.qso, EXIT_SUCCESS);
         } else {
-            wprintw(logw, "Self-test FAILED!\n");
-            wrefresh(logw);
+            wprintw(logwL, "Self-test FAILED!\n");
+            wrefresh(logwL);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
