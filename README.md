@@ -1,4 +1,4 @@
-# rtlsdr-ft8d -- FT8 daemon for RTL receivers
+# rtlsdr-ft8d -- Single-Band HF FT8 transceiver based on RTL receiver
 
 ![rtlsdr-wsprd](art/rtlsdr-ft8d-web.jpg)
 
@@ -9,7 +9,8 @@
 
 ## TL;DR
 
-This project aim at decoding [FT8](https://en.wikipedia.org/wiki/WSJT_(amateur_radio_software)#FT8) signals using an [RTL device](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr), usually connected to a [Raspberry Pi](https://www.raspberrypi.org/).
+This project aim at decoding [FT8](https://en.wikipedia.org/wiki/WSJT_(amateur_radio_software)#FT8) signals using an [RTL device](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr), usually connected to a [Raspberry Pi](https://www.raspberrypi.org/) and exploiting the RPi for generating the FT8 signal.
+Note that it requires proper License and HW for fulfilling the relevant rules.
 To install and use your dongle on a Raspberry Pi with a Raspberry Pi OS, follow these steps:
 
 ```bash
