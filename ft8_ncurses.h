@@ -10,6 +10,7 @@ int exit_ft8(bool qsomode,int status);
 extern WINDOW *logw;
 extern WINDOW *logwR;
 extern WINDOW *logwL;
+extern WINDOW *logwLH;
 
 extern WINDOW *qso;
 

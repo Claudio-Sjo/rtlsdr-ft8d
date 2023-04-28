@@ -1198,10 +1198,11 @@ int main(int argc, char **argv) {
     sleep((uwait / 1000000) > 3 ? (uwait / 1000000):3);
 
     wclear(logwL);
-    wattrset(logwL, A_NORMAL | A_BOLD);
-    mvwprintw(logwL, 0, 0, "   Freq     SNR   Msg\n");
+    wattrset(logwLH, A_NORMAL | A_BOLD);
+    mvwprintw(logwLH, 0, 0, "   Freq     SNR   Msg\n");
+    wrefresh(logwLH);
     wrefresh(logwL);
-    wattrset(logwR, A_NORMAL);
+    wattrset(logwL, A_NORMAL);
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;

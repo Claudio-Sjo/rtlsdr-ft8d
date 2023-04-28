@@ -24,7 +24,7 @@ std::vector<char> kbd_queue;
 
 WINDOW *header;
 
-WINDOW *logw0L, *logw0R, *logwL, *logwR;
+WINDOW *logw0L, *logw0R, *logwL, *logwR, *logwLH;
 
 WINDOW *qso, *qso0;
 
@@ -61,10 +61,11 @@ int init_ncurses() {
 
     logw0L = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
     logw0R = subwin(stdscr, LINES / 2, (COLS / 2) - 2, 2, (COLS / 2) + 1);
-    logwL = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 3, 3);
-    logwR = subwin(stdscr, (LINES / 2) - 3, (COLS / 2) - 5, 3, (COLS / 2) + 2);
+    logwLH = subwin(stdscr, 1, COLS / 2 - 3, 3, 3);
+    logwL = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
+    logwR = subwin(stdscr, (LINES / 2) - 2, (COLS / 2) - 5, 3, (COLS / 2) + 2);
 
-    logWLines = (LINES / 2) - 3; // Lines for scroll need not to include the Header Line
+    logWLines = (LINES / 2) - 3;  // Lines for scroll need not to include the Header Line
 
     qso0 = subwin(stdscr, (LINES / 2) - 5, COLS - 2, LINES / 2 + 2, 1);
     qso = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 3, 3);
@@ -227,7 +228,7 @@ void printCQ(bool refresh) {
         wmove(logwR, 0, 0);
         wrefresh(logwR);
 
-        wattrset(logwR, A_NORMAL| A_BOLD);
+        wattrset(logwR, A_NORMAL | A_BOLD);
 
         wprintw(logwR, "    Incoming CQ Requests\n");
 
@@ -277,8 +278,8 @@ void printCQ(bool refresh) {
     else
         wattrset(call, COLOR_PAIR(2) | A_BOLD);
     wmove(call, 0, 0);
+    werase(call);
     wprintw(call, "%s", txString);
-    clrtoeol();
     wrefresh(call);
     wattrset(call, A_NORMAL);
 }
