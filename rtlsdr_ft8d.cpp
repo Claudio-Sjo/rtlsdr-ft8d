@@ -491,9 +491,6 @@ void printSpots(uint32_t n_results) {
         }
     */
 
-    mvwprintw(logwL, 1, 2, "Time    SNR   Freq       Msg       Caller   Loc\n");
-    wrefresh(logwL);
-
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
         /* CQlock */
@@ -1197,6 +1194,14 @@ int main(int argc, char **argv) {
     uint32_t uwait = 15000000 - usec;
     wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
     wrefresh(logwL);
+
+    sleep((uwait / 1000000) > 3 ? (uwait / 1000000):3);
+
+    wclear(logwL);
+    wattrset(logwL, A_NORMAL | A_BOLD);
+    mvwprintw(logwL, 0, 0, "   Freq     SNR   Msg\n");
+    wrefresh(logwL);
+    wattrset(logwR, A_NORMAL);
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;

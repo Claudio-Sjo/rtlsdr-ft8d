@@ -278,6 +278,7 @@ void printCQ(bool refresh) {
         wattrset(call, COLOR_PAIR(2) | A_BOLD);
     wmove(call, 0, 0);
     wprintw(call, "%s", txString);
+    clrtoeol();
     wrefresh(call);
     wattrset(call, A_NORMAL);
 }

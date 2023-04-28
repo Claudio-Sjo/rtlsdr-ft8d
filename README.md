@@ -54,6 +54,7 @@ This application written in C does:
 - Decode FT8 signals
 - Report any CQ spots on PSKreporter (thanks to kholia https://github.com/kholia/rtlsdr-ft8d with small adjustment)
 - Repeat, again and again...
+- ft8 > /dev/null 2>1
 
 
 ## Installation
