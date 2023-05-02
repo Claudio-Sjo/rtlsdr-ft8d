@@ -71,7 +71,7 @@ int init_ncurses() {
     qso = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 3, 3);
 
     call0 = subwin(stdscr, 3, COLS - 2, LINES - 4, 1);
-    call = subwin(stdscr, 1, COLS - 4, LINES - 3, 3);
+    call = subwin(stdscr, 1, COLS - 5, LINES - 3, 3);
 
     start_color();
     init_pair(1, COLOR_YELLOW, COLOR_BLACK);

@@ -535,17 +535,15 @@ void txon(bool LedON) {
 }
 
 // Turn transmitter on
-void txoff(bool LedON) {
+void txoff() {
     // struct GPCTL setupword = {6/*SRC*/, 0, 0, 0, 0, 1,0x5a};
     // ACCESS_BUS_ADDR(CM_GP0CTL_BUS) = *((int*)&setupword);
     disable_clock();
     // turn off LED
-    if (LedON) {
-        CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 26);
-        CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 25);
-        CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 24);
-        CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
-    }
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 26);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 25);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 24);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
 }
 
 // Transmit symbol sym for tsym seconds.
@@ -638,7 +636,7 @@ void unSetupDMA() {
     // cout << "Exiting!" << std::endl;
     struct DMAregs *DMA0 = (struct DMAregs *)&(ACCESS_BUS_ADDR(DMA_BUS_BASE));
     DMA0->CS = 1 << 31;  // reset dma controller
-    txoff(true);
+    txoff();
 }
 
 // Truncate at bit lsb. i.e. set all bits less than lsb to zero.
@@ -1376,7 +1374,7 @@ int mainFT8(const int argc, char *const argv[]) {
     open_mbox();
     txon(false);
     setupDMA(constPage, instrPage, instrs);
-    txoff(false);
+    txoff();
 
     if (mode == TONE) {
         // Test tone mode...
@@ -1516,7 +1514,7 @@ int mainFT8(const int argc, char *const argv[]) {
                 n_tx++;
 
                 // Turn transmitter off
-                txoff(true);
+                txoff();
 
                 // End timestamp
                 gettimeofday(&tvEnd, NULL);
