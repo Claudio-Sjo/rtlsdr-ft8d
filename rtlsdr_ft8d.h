@@ -19,34 +19,31 @@
 
 #pragma once
 
-
 #include <unistd.h>
 
-
 /* Sampling definition for RTL devices & FT8 protocol */
-#define SIGNAL_LENGHT       15
-#define SIGNAL_SAMPLE_RATE  3200
-#define SAMPLING_RATE       2400000
-#define FS4_RATE            (SAMPLING_RATE / 4)
-#define DOWNSAMPLING        (SAMPLING_RATE / SIGNAL_SAMPLE_RATE)
-#define DEFAULT_BUF_LENGTH  (4 * 16384)
-#define FIR_TAPS            56
+#define SIGNAL_LENGHT 15
+#define SIGNAL_SAMPLE_RATE 3200
+#define SAMPLING_RATE 2400000
+#define FS4_RATE (SAMPLING_RATE / 4)
+#define DOWNSAMPLING (SAMPLING_RATE / SIGNAL_SAMPLE_RATE)
+#define DEFAULT_BUF_LENGTH (4 * 16384)
+#define FIR_TAPS 56
 
+#define K_MIN_SCORE 10
+#define K_MAX_CANDIDATES 120
+#define K_LDPC_ITERS 20
+#define K_MAX_MESSAGES 50
+#define K_FREQ_OSR 2
+#define K_TIME_OSR 2
+#define K_FSK_DEV 6.25f
 
-#define K_MIN_SCORE         10
-#define K_MAX_CANDIDATES    120
-#define K_LDPC_ITERS        20
-#define K_MAX_MESSAGES      50
-#define K_FREQ_OSR          2
-#define K_TIME_OSR          2
-#define K_FSK_DEV           6.25f
-
-#define NUM_BIN             (uint32_t)(SIGNAL_SAMPLE_RATE / (2.0f * K_FSK_DEV)) // 256
-#define BLOCK_SIZE          (uint32_t)(SIGNAL_SAMPLE_RATE / K_FSK_DEV)          // 512
-#define SUB_BLOCK_SIZE      (uint32_t)(BLOCK_SIZE / K_TIME_OSR)                 // 256
-#define NFFT                (uint32_t)(BLOCK_SIZE * K_FREQ_OSR)                 // 1024
-#define NUM_BLOCKS          (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE) // 92 vs 92.25 DCHECK
-#define MAG_ARRAY           (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)            // 94208 vs 94464 DCHECK
+#define NUM_BIN (uint32_t)(SIGNAL_SAMPLE_RATE / (2.0f * K_FSK_DEV))                                         // 256
+#define BLOCK_SIZE (uint32_t)(SIGNAL_SAMPLE_RATE / K_FSK_DEV)                                               // 512
+#define SUB_BLOCK_SIZE (uint32_t)(BLOCK_SIZE / K_TIME_OSR)                                                  // 256
+#define NFFT (uint32_t)(BLOCK_SIZE * K_FREQ_OSR)                                                            // 1024
+#define NUM_BLOCKS (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE)  // 92 vs 92.25 DCHECK
+#define MAG_ARRAY (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)                                // 94208 vs 94464 DCHECK
 
 /* Possible PATIENCE options for FFTW:
  * - FFTW_ESTIMATE
@@ -57,37 +54,40 @@
  */
 #define PATIENCE FFTW_ESTIMATE
 
-
 /* Debugging logs */
-#define LOG_DEBUG   0
-#define LOG_INFO    1
-#define LOG_WARN    2
-#define LOG_ERROR   3
-#define LOG_LEVEL   LOG_ERROR
-#define LOG(level, ...)  if (level >= LOG_LEVEL) fprintf(stderr, __VA_ARGS__)
+#define LOG_DEBUG 0
+#define LOG_INFO 1
+#define LOG_WARN 2
+#define LOG_ERROR 3
+#define LOG_LEVEL LOG_ERROR
+#define LOG(level, ...) \
+    if (level >= LOG_LEVEL) fprintf(stderr, __VA_ARGS__)
 
-
-#define safe_cond_signal(n, m) pthread_mutex_lock(m); pthread_cond_signal(n); pthread_mutex_unlock(m)
-#define safe_cond_wait(n, m) pthread_mutex_lock(m); pthread_cond_wait(n, m); pthread_mutex_unlock(m)
-
+#define safe_cond_signal(n, m) \
+    pthread_mutex_lock(m);     \
+    pthread_cond_signal(n);    \
+    pthread_mutex_unlock(m)
+#define safe_cond_wait(n, m) \
+    pthread_mutex_lock(m);   \
+    pthread_cond_wait(n, m); \
+    pthread_mutex_unlock(m)
 
 /* Thread for decoding */
 struct decoder_thread {
-    pthread_t        thread;
-    pthread_attr_t   attr;
-    pthread_cond_t   ready_cond;
-    pthread_mutex_t  ready_mutex;
+    pthread_t thread;
+    pthread_attr_t attr;
+    pthread_cond_t ready_cond;
+    pthread_mutex_t ready_mutex;
 };
-
 
 /* Option & config of the receiver */
 struct receiver_state {
     /* Variables used for stop conditions */
-    bool     exit_flag;
+    bool exit_flag;
 
     /* Double buffering used for sampling */
-    float    iSamples[2][SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
-    float    qSamples[2][SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
+    float iSamples[2][SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
+    float qSamples[2][SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
 
     /* Sample index */
     uint32_t iqIndex[2];
@@ -102,42 +102,45 @@ struct receiver_state {
 struct receiver_options {
     uint32_t dialfreq;
     uint32_t realfreq;
-    int32_t  gain;
-    int32_t  autogain;
-    int32_t  ppm;
-    int32_t  shift;
-    int32_t  upconverter;
-    int32_t  directsampling;
-    int32_t  maxloop;
-    int32_t  nloop;
-    int32_t  device;
-    bool     noreport;
-    bool     selftest;
-    bool     writefile;
-    bool     readfile;
-    bool     qso;
-    char     *filename;
+    int32_t gain;
+    int32_t autogain;
+    int32_t ppm;
+    int32_t shift;
+    int32_t upconverter;
+    int32_t directsampling;
+    int32_t maxloop;
+    int32_t nloop;
+    int32_t device;
+    bool noreport;
+    bool selftest;
+    bool writefile;
+    bool readfile;
+    bool qso;
+    char *filename;
 };
-
 
 /* Option & config of decoder */
 struct decoder_options {
-    uint32_t freq;         // Dial frequency
-    char     rcall[13];    // Callsign of the RX station
-    char     rloc[7];      // Locator of the RX station
+    uint32_t freq;   // Dial frequency
+    char rcall[13];  // Callsign of the RX station
+    char rloc[7];    // Locator of the RX station
 };
 
 struct decoder_results {
-    char     cmd[13];
-    char     call[13];
-    char     dest[13];
-    char     loc[7];
-    int32_t  freq;
-    int32_t  snr;
+    char cmd[13];
+    char call[13];
+    char dest[13];
+    char loc[7];
+    int32_t freq;
+    int32_t snr;
 };
 
 struct plain_message {
+    char src[13];
+    char dest[13];
     char message[40];
+    int32_t freq;
+    int32_t snr;
 };
 
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);

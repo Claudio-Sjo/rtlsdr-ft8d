@@ -304,14 +304,13 @@ bool addToCQ(struct decoder_results *dr) {
 }
 
 bool addToQSO(struct plain_message *qsoMsg) {
-    char *dst = strtok(qsoMsg->message, " ");
 
     if (activeWin == QSOWIN)
-        wattrset(logwR, COLOR_PAIR(13) | A_BOLD);
+        wattrset(qso, COLOR_PAIR(13) | A_BOLD);
     else
-        wattrset(logwR, COLOR_PAIR(3) | A_BOLD);
+        wattrset(qso, COLOR_PAIR(3) | A_BOLD);
 
-    wprintw(qso, "%s\n", qsoMsg->message);
+    wprintw(qso, "%dHz  %ddB %s %s %s\n", qsoMsg->freq, (qsoMsg->snr - 20), qsoMsg->src, qsoMsg->dest, qsoMsg->message);
     wattrset(qso, A_NORMAL);
     wrefresh(qso);
 
@@ -350,6 +349,8 @@ void *CQHandler(void *vargp) {
             qsoMsg = qso_queue.front();
             qso_queue.erase(qso_queue.begin());
             pthread_mutex_unlock(&QSOlock);
+
+            if (addToQSO(&qsoMsg))
 
             termRefresh = true;
         }

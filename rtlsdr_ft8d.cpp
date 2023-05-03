@@ -1195,7 +1195,7 @@ int main(int argc, char **argv) {
     wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
     wrefresh(logwL);
 
-    sleep((uwait / 1000000) > 3 ? (uwait / 1000000):3);
+    sleep((uwait / 1000000) > 3 ? (uwait / 1000000) : 3);
 
     wclear(logwL);
     wattrset(logwLH, A_NORMAL | A_BOLD);
@@ -1418,7 +1418,7 @@ void ft8_subsystem(float *iSamples,
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
 
-                decodes[num_decoded].freq = (int32_t)freq_hz;
+                decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
                 decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
                 pthread_mutex_unlock(&msglock);
@@ -1429,14 +1429,23 @@ void ft8_subsystem(float *iSamples,
                     struct plain_message qsoMsg;
 
                     wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+
+                    char *dst = strPtr;
+                    char *src = strtok(NULL, " ");
+                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
+                    snprintf(qsoMsg.dest,sizeof(qsoMsg.dest), "%s", dst);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL," \n"));
+
+                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
                     pthread_mutex_lock(&QSOlock);             // Protect decodes structure
-                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msgToPrint);
                     qso_queue.push_back(qsoMsg);
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                 }
             }
 
-            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq, (int32_t)cand->score, msgToPrint);
+            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
 
             wrefresh(logwL);
         }
