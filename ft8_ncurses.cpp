@@ -87,6 +87,7 @@ int init_ncurses() {
     init_pair(2, COLOR_RED, COLOR_BLACK);
     init_pair(3, COLOR_GREEN, COLOR_BLACK);
     init_pair(4, COLOR_CYAN, COLOR_BLACK);
+    init_pair(10, COLOR_BLACK, COLOR_YELLOW);
     init_pair(11, COLOR_YELLOW, COLOR_RED);
     init_pair(12, COLOR_BLACK, COLOR_RED);
     init_pair(13, COLOR_BLACK, COLOR_GREEN);
@@ -94,7 +95,8 @@ int init_ncurses() {
 
     attrset(COLOR_PAIR(1) | A_BOLD);
     wattrset(logw0L, COLOR_PAIR(3) | A_BOLD);
-    wattrset(qso0, COLOR_PAIR(1) | A_BOLD);
+    wattrset(logw0R, COLOR_PAIR(3) | A_BOLD);
+    wattrset(qso0, COLOR_PAIR(3) | A_BOLD);
     wattrset(call0, COLOR_PAIR(4) | A_BOLD);
 
     box(stdscr, 0, 0);
@@ -267,6 +269,7 @@ void *TXHandler(void *vargp) {
             // closing the connected socket
             close(client_fd);
         }
+        usleep(10000);  // Wait 10msec
     }
 }
 
@@ -347,8 +350,8 @@ void *KBDHandler(void *vargp) {
                             cqIdx++;
                     }
                     key = 0;
-                } else
-                    status = IDLE;
+                }
+                status = IDLE;
                 break;
 
             default:
