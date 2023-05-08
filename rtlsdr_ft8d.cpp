@@ -1222,6 +1222,7 @@ int main(int argc, char **argv) {
     pthread_create(&spottingThread, NULL, pskUploader, NULL);
     pthread_create(&spottingThread, NULL, CQHandler, NULL);
     pthread_create(&spottingThread, NULL, KBDHandler, NULL);
+    pthread_create(&spottingThread, NULL, TXHandler, NULL);
 
     /* Main loop : Wait, read, decode */
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {

@@ -8,8 +8,12 @@
 #include <pthread.h>
 #include <assert.h>
 #include <vector>
+#include <ctype.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include "./rtlsdr_ft8d.h"
+#include "./ft8tx/FT8Types.h"
 
 extern char rtlsdr_ft8d_version[];
 extern char pskreporter_app_version[];
@@ -21,6 +25,9 @@ extern struct decoder_options dec_options;
 
 pthread_mutex_t KBDlock;
 std::vector<char> kbd_queue;
+
+pthread_mutex_t TXlock;
+std::vector<FT8Msg> tx_queue;
 
 WINDOW *header;
 
@@ -40,6 +47,8 @@ WINDOW *call, *call0;
 int activeWin = CQWIN;
 
 char txString[MAXTXSTRING];
+char editString[MAXTXSTRING];
+char destString[MAXTXSTRING];
 
 struct decoder_results cqReq[MAXCQ];
 int cqFirst, cqLast, cqIdx;
@@ -126,6 +135,9 @@ int init_ncurses() {
         sprintf(cqReq[i].call, "NONE");
     }
 
+    sprintf(txString, "");
+    sprintf(editString, "");
+
     cqFirst = cqLast = cqIdx = 0;
 
     /* End initialization */
@@ -148,6 +160,118 @@ int exit_ft8(bool qsomode, int status) {
     return status;
 }
 
+// This is the interface with the tx task
+
+/* Program constants */
+#define SOCKNAME "/tmp/ft8S"
+#define MAXCONNECT 5
+#define FOREVER 1
+
+#define SUCCESSFUL_RUN 0
+#define FTOK_FAIL 1
+#define MSGGET_FAIL 2
+
+/* Maximum size for a string, normally it's useful :-) */
+#define MAXSTRING 255
+
+/* The first socket descriptor of the table is the listening one */
+#define SD 0
+
+/* Error values */
+#define NO_ERROR 0
+#define ERR_NULL_POINTER 1001
+#define ERR_MSG_SEND 1002
+#define ERR_MSG_RECEIVE 1003
+#define ERR_MISSING_SOCK 1004
+#define ERR_PARSER 1005
+
+#define RECEIVE_CMD 2000
+#define QUIT_PROGRAM 2001
+#define WAIT_PROGRAM 2002
+#define WAIT_KEYBD 2003
+
+/* Valid actions */
+#define MESSAGE_SEND 1
+#define MESSAGE_RECV 2
+
+#define TX_IDLE 0
+#define TX_WAITING 1
+#define TX_ONGOING 2
+#define TX_END 3
+
+int txStatusFlag;
+
+void *TXHandler(void *vargp) {
+    int status, valread, client_fd;
+    struct sockaddr serv_addr = {AF_UNIX, SOCKNAME};
+
+    FT8Msg Txletter, Rxletter;
+    char key = 0;
+
+    txStatusFlag = TX_IDLE;
+
+    while (true) {
+        if (tx_queue.size()) {
+            // Receive the message from the queue
+            pthread_mutex_lock(&TXlock);
+            Txletter = tx_queue.front();
+            tx_queue.erase(tx_queue.begin());
+            pthread_mutex_unlock(&TXlock);
+
+            sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+            Txletter.type = SEND_F8_REQ;
+
+            if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+                perror("\n Socket creation error \n");
+            }
+
+            if ((status = connect(client_fd, (struct sockaddr *)&serv_addr,
+                                  sizeof(serv_addr))) < 0) {
+                perror("\nConnection Failed \n");
+            }
+            send(client_fd, &Txletter, sizeof(Txletter), 0);
+
+            valread = read(client_fd, &Rxletter, sizeof(Rxletter));
+            if (!valread) {
+                perror("Error, nothing read");
+            }
+            txStatusFlag = TX_WAITING;
+            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
+            kbd_queue.push_back(key);
+            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+
+            valread = read(client_fd, &Rxletter, sizeof(Rxletter));
+            if (!valread) {
+                perror("Error, nothing read");
+            }
+            txStatusFlag = TX_ONGOING;
+            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
+            kbd_queue.push_back(key);
+            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+
+            valread = read(client_fd, &Rxletter, sizeof(Rxletter));
+            if (!valread) {
+                perror("Error, nothing read");
+            }
+            txStatusFlag = TX_END;
+            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
+            kbd_queue.push_back(key);
+            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+            sleep(1);
+
+            txStatusFlag = TX_IDLE;
+            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
+            kbd_queue.push_back(key);
+            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+
+            // closing the connected socket
+            close(client_fd);
+        }
+    }
+}
+
+// End of the tx interface
+
 #define IDLE 0
 #define ESC1 27
 #define ESC2 91
@@ -155,35 +279,59 @@ int exit_ft8(bool qsomode, int status) {
 #define DOWN 66
 #define RIGHT 67
 #define LEFT 68
+#define DEL 127
+#define TAB 9
+#define ENTER 10
 
 /* KBD Handler Thread */
 void *KBDHandler(void *vargp) {
     static int status = IDLE;
+    FT8Msg Txletter;
+
     while (true) {
         /* CQlock */
 
-        char key = wgetch(call);
+        char key = toupper(wgetch(call));
+        int ix = strlen(editString);
 
         switch (status) {
             case IDLE:
-                if (key == ESC1) {
-                    status = key;
-                    key = 0;
+                switch (key) {
+                    case ESC1:
+                        status = key;
+                        key = 0;
+                        break;
 
-                } else {
-                    if (key == 9) {
+                    case TAB:
                         if (++activeWin > TXWIN)
                             activeWin = CQWIN;
                         key = 0;
-                    }
-                }
+                        break;
 
+                    case ENTER:  // Activate transmission
+                        sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+                        pthread_mutex_lock(&TXlock);  // Protect key queue structure
+                        tx_queue.push_back(Txletter);
+                        pthread_mutex_unlock(&TXlock);  // Protect key queue structure
+                        break;
+                    case DEL:
+                        if (ix)
+                            editString[ix - 1] = 0;
+                        break;
+
+                    default:
+                        editString[ix] = key;
+                        editString[ix + 1] = 0;
+                }
+                wprintw(qso, "Key Pressed %d, editString %s\n", key, editString);
+                wrefresh(qso);
                 break;
             case ESC1:
                 if (key == ESC2) {
                     status = key;
                     key = 0;
-                }
+                } else
+                    status = IDLE;
                 break;
             case ESC2:
                 if (activeWin == CQWIN) {
@@ -199,17 +347,18 @@ void *KBDHandler(void *vargp) {
                             cqIdx++;
                     }
                     key = 0;
-                }
+                } else
+                    status = IDLE;
                 break;
 
             default:
-
                 status = IDLE;
         }
 
         // wprintw(qso, "Key Pressed %d\n", key);
         // wprintw(qso, "Active Win %d\n", activeWin);
         // wrefresh(qso);
+
         pthread_mutex_lock(&KBDlock);  // Protect key queue structure
         kbd_queue.push_back(key);
         pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
@@ -272,14 +421,33 @@ void printCQ(bool refresh) {
         wrefresh(logwR);
     }
     // Print on the call window
-    sprintf(txString, "%s %s %s", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
-    if (activeWin == TXWIN)
-        wattrset(call, COLOR_PAIR(12) | A_BOLD);
-    else
-        wattrset(call, COLOR_PAIR(2) | A_BOLD);
+    sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
     wmove(call, 0, 0);
     werase(call);
-    wprintw(call, "%s", txString);
+    switch (txStatusFlag) {
+        case TX_IDLE:
+            wattrset(call, COLOR_PAIR(1) | A_BOLD);
+            waddstr(call, txString);
+            wattrset(call, COLOR_PAIR(3) | A_BOLD);
+            waddstr(call, editString);
+            break;
+        case TX_WAITING:
+            wattrset(call, COLOR_PAIR(1) | A_BOLD);
+            waddstr(call, txString);
+            waddstr(call, editString);
+            break;
+        case TX_ONGOING:
+            wattrset(call, COLOR_PAIR(3) | A_BOLD);
+            waddstr(call, txString);
+            waddstr(call, editString);
+            break;
+        case TX_END:
+            wattrset(call, A_NORMAL);
+            waddstr(call, txString);
+            waddstr(call, editString);
+            break;
+    }
+
     wrefresh(call);
     wattrset(call, A_NORMAL);
 }
@@ -304,7 +472,6 @@ bool addToCQ(struct decoder_results *dr) {
 }
 
 bool addToQSO(struct plain_message *qsoMsg) {
-
     if (activeWin == QSOWIN)
         wattrset(qso, COLOR_PAIR(13) | A_BOLD);
     else
@@ -352,7 +519,7 @@ void *CQHandler(void *vargp) {
 
             if (addToQSO(&qsoMsg))
 
-            termRefresh = true;
+                termRefresh = true;
         }
         /* if needed update the screen */
         printCQ(termRefresh);

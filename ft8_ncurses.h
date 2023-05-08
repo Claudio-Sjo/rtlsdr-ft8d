@@ -19,3 +19,4 @@ extern WINDOW *call;
 /* CQ Handler Thread */
 void *CQHandler(void *vargp);
 void *KBDHandler(void *vargp);
+void *TXHandler(void *vargp);
