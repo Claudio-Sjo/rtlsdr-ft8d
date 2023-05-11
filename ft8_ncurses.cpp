@@ -19,8 +19,10 @@ extern char rtlsdr_ft8d_version[];
 extern char pskreporter_app_version[];
 extern std::vector<struct decoder_results> cq_queue;
 extern std::vector<struct plain_message> qso_queue;
+extern std::vector<struct plain_message> log_queue;
 extern pthread_mutex_t CQlock;
 extern pthread_mutex_t QSOlock;
+extern pthread_mutex_t LOGlock;
 extern struct decoder_options dec_options;
 
 pthread_mutex_t KBDlock;
@@ -51,9 +53,12 @@ char editString[MAXTXSTRING];
 char destString[MAXTXSTRING];
 
 struct decoder_results cqReq[MAXCQ];
+struct plain_message qsoReq[MAXCQ];
 int cqFirst, cqLast, cqIdx;
+int qsoFirst, qsoLast, qsoIdx;
 
 int logWLines;
+int qsoWLines;
 
 int init_ncurses() {
     initscr();
@@ -78,6 +83,7 @@ int init_ncurses() {
 
     qso0 = subwin(stdscr, (LINES / 2) - 5, COLS - 2, LINES / 2 + 2, 1);
     qso = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 3, 3);
+    qsoWLines = getmaxy(qso);
 
     call0 = subwin(stdscr, 3, COLS - 2, LINES - 4, 1);
     call = subwin(stdscr, 1, COLS - 5, LINES - 3, 3);
@@ -141,6 +147,7 @@ int init_ncurses() {
     sprintf(editString, "");
 
     cqFirst = cqLast = cqIdx = 0;
+    qsoFirst = qsoLast = qsoIdx = 0;
 
     /* End initialization */
     return (0);
@@ -326,8 +333,8 @@ void *KBDHandler(void *vargp) {
                         editString[ix] = key;
                         editString[ix + 1] = 0;
                 }
-                wprintw(qso, "Key Pressed %d, editString %s\n", key, editString);
-                wrefresh(qso);
+                // wprintw(qso, "Key Pressed %d, editString %s\n", key, editString);
+                // wrefresh(qso);
                 break;
             case ESC1:
                 if (key == ESC2) {
@@ -423,7 +430,60 @@ void printCQ(bool refresh) {
         wattrset(logwR, A_NORMAL);
         wrefresh(logwR);
     }
-    // Print on the call window
+}
+
+// Print on the QSO window
+void printQSO(bool refresh) {
+    if (!refresh)
+        return;
+
+    if (cqFirst != cqLast) {
+        if (qsoLast > qsoFirst) {
+            for (int i = qsoFirst; i < qsoLast; i++) {
+                if (i == qsoIdx) {
+                    if (activeWin == QSOWIN)
+                        wattrset(qso, COLOR_PAIR(12) | A_BOLD);
+                    else
+                        wattrset(qso, COLOR_PAIR(2) | A_BOLD);
+                } else
+                    wattrset(qso, A_NORMAL);
+
+                wprintw(qso, "%dHz  %ddB %s %s\n",
+                        qsoReq[i].freq,
+                        qsoReq[i].snr - 20,
+                        qsoReq[i].src,
+                        qsoReq[i].message);
+            }
+        } else {
+            int idx = qsoFirst;
+            for (int i = 0; i < qsoWLines; i++) {
+                if (i == qsoIdx) {
+                    if (activeWin == QSOWIN)
+                        wattrset(qso, COLOR_PAIR(12) | A_BOLD);
+                    else
+                        wattrset(qso, COLOR_PAIR(2) | A_BOLD);
+                } else
+                    wattrset(qso, A_NORMAL);
+
+                wprintw(qso, "%dHz  %ddB %s %s\n",
+                        qsoReq[i].freq,
+                        qsoReq[i].snr - 20,
+                        qsoReq[i].src,
+                        qsoReq[i].message);
+
+                idx = (idx + 1) % qsoWLines;
+            }
+        }
+        wattrset(qso, A_NORMAL);
+        wrefresh(qso);
+    }
+}
+
+// Print on the Call window
+void printCall(bool refresh) {
+    if (!refresh)
+        return;
+
     sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
     wmove(call, 0, 0);
     werase(call);
@@ -455,6 +515,26 @@ void printCQ(bool refresh) {
     wattrset(call, A_NORMAL);
 }
 
+void printLog(plain_message *logMsg) {
+    wattrset(logwL, A_NORMAL);
+
+    if (!strncmp(logMsg->dest, "CQ", 2))          // CQ messages are RED
+        wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
+
+    if (!strncmp(logMsg->message, dec_options.rcall, strlen(dec_options.rcall)))
+        wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+
+    wprintw(logwL, "%dHz  %3ddB %s %s %s\n",
+            logMsg->freq,
+            logMsg->snr - 20,
+            logMsg->dest,
+            logMsg->src,
+            logMsg->message);
+
+    wrefresh(logwL);
+    wattrset(logwL, A_NORMAL);
+}
+
 /* A new CQ request has been received, let's add it to the table */
 bool addToCQ(struct decoder_results *dr) {
     /* Is the caller already in the table? */
@@ -475,16 +555,35 @@ bool addToCQ(struct decoder_results *dr) {
 }
 
 bool addToQSO(struct plain_message *qsoMsg) {
-    if (activeWin == QSOWIN)
-        wattrset(qso, COLOR_PAIR(13) | A_BOLD);
-    else
-        wattrset(qso, COLOR_PAIR(3) | A_BOLD);
+    for (uint32_t i = 0; i < qsoWLines; i++)
+        if (strcmp(qsoMsg->src, qsoReq[i].src) == 0)
+            return false;  // Found! we don't add anything
 
-    wprintw(qso, "%dHz  %ddB %s %s %s\n", qsoMsg->freq, (qsoMsg->snr - 20), qsoMsg->src, qsoMsg->dest, qsoMsg->message);
-    wattrset(qso, A_NORMAL);
-    wrefresh(qso);
+    qsoReq[qsoLast].freq = qsoMsg->freq;
+    qsoReq[qsoLast].snr = qsoMsg->snr;
+    strcpy(qsoReq[qsoLast].message, qsoMsg->message);
+    strcpy(qsoReq[qsoLast].src, qsoMsg->src);
+
+    qsoLast = (qsoLast + 1) % qsoWLines;
+    if (qsoLast == qsoFirst)
+        qsoFirst = (qsoFirst + 1) % qsoWLines;
 
     return true;
+}
+
+void printHeaders(void) {
+    wattrset(logwLH, A_NORMAL | A_BOLD);
+    mvwprintw(logwLH, 0, 0, "   Freq       SNR Msg\n");
+    wattrset(logwLH, A_NORMAL);
+
+    wrefresh(logwLH);
+
+    wattrset(logwR, A_NORMAL | A_BOLD);
+
+    wprintw(logwR, "    Incoming CQ Requests\n");
+    wattrset(logwR, A_NORMAL);
+
+    wrefresh(logwR);
 }
 
 /* CQ Handler Thread */
@@ -495,15 +594,23 @@ void *CQHandler(void *vargp) {
         char key;
         struct decoder_results dr;
         struct plain_message qsoMsg;
+        struct plain_message logMsg;
 
+        if (log_queue.size()) {
+            pthread_mutex_lock(&LOGlock);
+            logMsg = log_queue.front();
+            log_queue.erase(log_queue.begin());
+            pthread_mutex_unlock(&LOGlock);
+
+            printLog(&logMsg);
+        }
         if (cq_queue.size()) {
             pthread_mutex_lock(&CQlock);
             dr = cq_queue.front();
             cq_queue.erase(cq_queue.begin());
             pthread_mutex_unlock(&CQlock);
 
-            if (addToCQ(&dr))
-                termRefresh = true;
+            printCQ(addToCQ(&dr));
         }
         if (kbd_queue.size()) {
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
@@ -520,12 +627,12 @@ void *CQHandler(void *vargp) {
             qso_queue.erase(qso_queue.begin());
             pthread_mutex_unlock(&QSOlock);
 
-            if (addToQSO(&qsoMsg))
-
-                termRefresh = true;
+            printQSO(addToQSO(&qsoMsg));
         }
         /* if needed update the screen */
         printCQ(termRefresh);
+        printQSO(termRefresh);
+        printCall(termRefresh);
         if (termRefresh)
             refresh();
         termRefresh = false;

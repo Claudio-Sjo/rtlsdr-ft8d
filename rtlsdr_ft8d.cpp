@@ -79,6 +79,7 @@ struct decoder_results dec_results[50];
 vector<struct decoder_results> dec_results_queue;
 vector<struct decoder_results> cq_queue;
 vector<struct plain_message> qso_queue;
+vector<struct plain_message> log_queue;
 int dec_results_queue_index = 0;
 
 /* mutex for thread sync */
@@ -86,6 +87,7 @@ pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;
 ;
 pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
 char rtlsdr_ft8d_version[] = "0.3.8b";
@@ -1198,11 +1200,9 @@ int main(int argc, char **argv) {
     sleep((uwait / 1000000) > 3 ? (uwait / 1000000) : 3);
 
     wclear(logwL);
-    wattrset(logwLH, A_NORMAL | A_BOLD);
-    mvwprintw(logwLH, 0, 0, "   Freq     SNR   Msg\n");
-    wrefresh(logwLH);
     wrefresh(logwL);
     wattrset(logwL, A_NORMAL);
+    printHeaders();
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
@@ -1390,17 +1390,13 @@ void ft8_subsystem(float *iSamples,
         /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
             char msgToPrint[32];
+            char msgToLog[32];
 
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
             snprintf(msgToPrint, sizeof(msgToPrint), "%s", message.text);
-
-            wattrset(logwL, A_NORMAL);
-
-            if (strstr(message.text, "CQ ") == message.text) {
-                wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // CQ are RED
-            }
+            snprintf(msgToLog, sizeof(msgToLog), "%s", message.text);
 
             char *strPtr = strtok(message.text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
@@ -1429,26 +1425,41 @@ void ft8_subsystem(float *iSamples,
                 if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
                     struct plain_message qsoMsg;
 
-                    wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
-
                     char *dst = strPtr;
                     char *src = strtok(NULL, " ");
                     snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
-                    snprintf(qsoMsg.dest,sizeof(qsoMsg.dest), "%s", dst);
-                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL," \n"));
+                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL, " \n"));
 
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
-                    pthread_mutex_lock(&QSOlock);             // Protect decodes structure
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
                     qso_queue.push_back(qsoMsg);
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                 }
             }
+            struct plain_message logMsg;
 
-            wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
+            strPtr = strtok(msgToLog, " ");
 
-            wrefresh(logwL);
+            char *dst = strPtr;
+            char *src = strtok(NULL, " ");
+            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src);
+            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst);
+            snprintf(logMsg.message, sizeof(logMsg.message), "%s", strtok(NULL, " \n"));
+
+            logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+            logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+            pthread_mutex_lock(&LOGlock);  // Protect decodes structure
+            log_queue.push_back(logMsg);
+
+            pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
+
+            // wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
+
+            // wrefresh(logwL);
         }
     }
     *n_results = num_decoded;
