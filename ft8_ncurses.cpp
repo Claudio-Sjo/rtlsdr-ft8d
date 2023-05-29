@@ -437,7 +437,7 @@ void printQSO(bool refresh) {
     if (!refresh)
         return;
 
-    if (cqFirst != cqLast) {
+    if (qsoFirst != qsoLast) {
         if (qsoLast > qsoFirst) {
             for (int i = qsoFirst; i < qsoLast; i++) {
                 if (i == qsoIdx) {
