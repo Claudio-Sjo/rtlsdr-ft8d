@@ -484,27 +484,36 @@ void printCall(bool refresh) {
     if (!refresh)
         return;
 
-    sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
-    wmove(call, 0, 0);
+    if (activeWin == CQWIN)
+        sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+    if (activeWin == QSOWIN)
+        sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
+
+    wmove(call, 0, 0);  // Y,X
     werase(call);
+    wattrset(call, COLOR_PAIR(1) | A_BOLD);
+    waddstr(call, txString);
+    wattrset(call, COLOR_PAIR(3) | A_BOLD);
+    waddstr(call, editString);
+
     switch (txStatusFlag) {
         case TX_IDLE:
-            wattrset(call, COLOR_PAIR(1) | A_BOLD);
-            waddstr(call, txString);
-            wattrset(call, COLOR_PAIR(3) | A_BOLD);
-            waddstr(call, editString);
+
             break;
         case TX_WAITING:
+            wmove(call, 0, COLS / 2);  // Y,X
             wattrset(call, COLOR_PAIR(1) | A_BOLD);
             waddstr(call, txString);
             waddstr(call, editString);
             break;
         case TX_ONGOING:
+            wmove(call, 0, COLS / 2);  // Y,X
             wattrset(call, COLOR_PAIR(3) | A_BOLD);
             waddstr(call, txString);
             waddstr(call, editString);
             break;
         case TX_END:
+            wmove(call, 0, COLS / 2);  // Y,X
             wattrset(call, A_NORMAL);
             waddstr(call, txString);
             waddstr(call, editString);
