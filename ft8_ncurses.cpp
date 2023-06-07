@@ -415,7 +415,7 @@ void printCQ(bool refresh) {
                 } else
                     wattrset(logwR, A_NORMAL);
 
-                wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
+                wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
                         cqReq[i].cmd,
                         cqReq[i].call,
                         cqReq[i].freq,
@@ -432,7 +432,7 @@ void printCQ(bool refresh) {
                 } else
                     wattrset(logwR, A_NORMAL);
 
-                wprintw(logwR, "%.6s DE  %13s freq. %8dHz %2ddB\n",
+                wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
                         cqReq[(i + cqFirst) % logWLines].cmd,
                         cqReq[(i + cqFirst) % logWLines].call,
                         cqReq[(i + cqFirst) % logWLines].freq,
@@ -462,7 +462,7 @@ void printQSO(bool refresh) {
                 } else
                     wattrset(qso, A_NORMAL);
 
-                wprintw(qso, "%dHz  %ddB %s %s\n",
+                wprintw(qso, " %dHz  %ddB %s %s\n",
                         qsoReq[i].freq,
                         qsoReq[i].snr - 20,
                         qsoReq[i].src,
@@ -479,7 +479,7 @@ void printQSO(bool refresh) {
                 } else
                     wattrset(qso, A_NORMAL);
 
-                wprintw(qso, "%dHz  %ddB %s %s\n",
+                wprintw(qso, " %dHz  %ddB %s %s\n",
                         qsoReq[i].freq,
                         qsoReq[i].snr - 20,
                         qsoReq[i].src,
@@ -502,6 +502,8 @@ void printCall(bool refresh) {
         sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
     if (activeWin == QSOWIN)
         sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
+    if (activeWin == TXWIN)
+        sprintf(txString, "");
 
     wmove(call, 0, 0);  // Y,X
     werase(call);
