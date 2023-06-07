@@ -613,31 +613,28 @@ void printHeaders(void) {
 void focusOnWin(int whatWin) {
     switch (whatWin) {
         case CQWIN:
-            box(logw0R, 186, 205);
             wborder(logw0R, 186, 186, 205, 205, 201, 187, 200, 188);
-            wrefresh(logwR);
+            wrefresh(logw0R);
             box(qso0, 0, 0);
             wrefresh(qso0);
             box(call0, 0, 0);
             wrefresh(call0);
             break;
         case QSOWIN:
-            box(qso0, 186, 205);
             wborder(qso0, 186, 186, 205, 205, 201, 187, 200, 188);
             wrefresh(qso0);
-            box(logwR, 0, 0);
-            wrefresh(logwR);
+            box(logw0R, 0, 0);
+            wrefresh(logw0R);
             box(call0, 0, 0);
             wrefresh(call0);
             break;
         case TXWIN:
-            box(call0, 186, 205);
             wborder(call0, 186, 186, 205, 205, 201, 187, 200, 188);
             wrefresh(call0);
             box(qso0, 0, 0);
             wrefresh(qso0);
-            box(logwR, 0, 0);
-            wrefresh(logwR);
+            box(logw0R, 0, 0);
+            wrefresh(logw0R);
             break;
     }
 }
