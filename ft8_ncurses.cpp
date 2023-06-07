@@ -315,7 +315,7 @@ void *KBDHandler(void *vargp) {
                     case TAB:
                         if (++activeWin > TXWIN)
                             activeWin = CQWIN;
-                        key = 0;
+                        // key = 0;
                         break;
 
                     case ENTER:  // Activate transmission
@@ -609,6 +609,39 @@ void printHeaders(void) {
     wrefresh(logwR);
 }
 
+// Focus on the chosen window
+void focusOnWin(int whatWin) {
+    switch (whatWin) {
+        case CQWIN:
+            box(logw0R, 186, 205);
+            wborder(logw0R, 186, 186, 205, 205, 201, 187, 200, 188);
+            wrefresh(logwR);
+            box(qso0, 0, 0);
+            wrefresh(qso0);
+            box(call0, 0, 0);
+            wrefresh(call0);
+            break;
+        case QSOWIN:
+            box(qso0, 186, 205);
+            wborder(qso0, 186, 186, 205, 205, 201, 187, 200, 188);
+            wrefresh(qso0);
+            box(logwR, 0, 0);
+            wrefresh(logwR);
+            box(call0, 0, 0);
+            wrefresh(call0);
+            break;
+        case TXWIN:
+            box(call0, 186, 205);
+            wborder(call0, 186, 186, 205, 205, 201, 187, 200, 188);
+            wrefresh(call0);
+            box(qso0, 0, 0);
+            wrefresh(qso0);
+            box(logwR, 0, 0);
+            wrefresh(logwR);
+            break;
+    }
+}
+
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
     static bool termRefresh = false;
@@ -640,6 +673,9 @@ void *CQHandler(void *vargp) {
             key = kbd_queue.front();
             kbd_queue.erase(kbd_queue.begin());
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+
+            if (key == TAB)
+                focusOnWin(activeWin);
 
             termRefresh = true;
         }
