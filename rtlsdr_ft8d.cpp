@@ -1406,10 +1406,17 @@ void ft8_subsystem(float *iSamples,
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
 
                 sprintf(decodes[num_decoded].cmd, "CQ   ");
+                // If what follows CQ is 2 chars then we keep it in CQ command
+                if (2 == strlen(strPtr)) {
+                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
+                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
+                }
+                /*
                 if (!strncmp(strPtr, "DX", 2)) {
                     sprintf(decodes[num_decoded].cmd, "CQ DX");
                     strPtr = strtok(NULL, " ");  // Move on the Callsign part
                 }
+                */
 
                 snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part

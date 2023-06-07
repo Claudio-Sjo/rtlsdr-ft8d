@@ -319,7 +319,21 @@ void *KBDHandler(void *vargp) {
                         break;
 
                     case ENTER:  // Activate transmission
-                        sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+                        switch (activeWin) {
+                            case CQWIN:
+                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+                                break;
+                            case QSOWIN:
+                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
+                                break;
+                            case TXWIN:
+                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s", editString);
+                                break;
+                            default:
+                                sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+                                break;
+                        }
+
                         pthread_mutex_lock(&TXlock);  // Protect key queue structure
                         tx_queue.push_back(Txletter);
                         pthread_mutex_unlock(&TXlock);  // Protect key queue structure
