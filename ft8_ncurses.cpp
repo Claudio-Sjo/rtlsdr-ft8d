@@ -614,7 +614,7 @@ void focusOnWin(int whatWin) {
     switch (whatWin) {
         case CQWIN:
             box(logw0R, 0, 0);
-            mvwprintw(logw0R, 0, 10, "┤ CQ Reply Mode ├");
+            mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
             wrefresh(logw0R);
             box(qso0, 0, 0);
             wrefresh(qso0);
@@ -623,6 +623,7 @@ void focusOnWin(int whatWin) {
             break;
         case QSOWIN:
             box(qso0, 0, 0);
+            mvwprintw(logw0R, 0, 10, " QSO Reply Mode ");
             wrefresh(qso0);
             box(logw0R, 0, 0);
             wrefresh(logw0R);
@@ -631,6 +632,7 @@ void focusOnWin(int whatWin) {
             break;
         case TXWIN:
             box(call0, 0, 0);
+            mvwprintw(logw0R, 0, 10, " TX Freetext Mode ");
             wrefresh(call0);
             box(qso0, 0, 0);
             wrefresh(qso0);
