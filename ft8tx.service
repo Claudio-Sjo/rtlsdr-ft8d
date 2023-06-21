@@ -1,0 +1,10 @@
+[Unit]
+Description=FT8 Transmitter Service
+
+[Service]
+ExecStart=/usr/local/bin/Ft8 >> /dev/null 2>1 &
+Type=simple
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
