@@ -56,6 +56,10 @@ This application written in C does:
 - Repeat, again and again...
 - ft8 > /dev/null 2>1
 
+## Documentation
+
+The service creation is described here: https://linuxhandbook.com/create-systemd-services/
+
 
 ## Installation
 
