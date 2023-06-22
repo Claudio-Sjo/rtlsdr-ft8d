@@ -1,8 +1,9 @@
 [Unit]
 Description=FT8 Transmitter Service
+After=multi-user.target
 
 [Service]
-ExecStart=/usr/local/bin/Ft8 >> /dev/null 2>1 &
+ExecStart=/usr/local/bin/ft8
 Type=simple
 Restart=always
 

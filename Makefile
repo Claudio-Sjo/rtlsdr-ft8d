@@ -50,3 +50,6 @@ clean:
 
 install:
 	install rtlsdr_ft8d /usr/local/bin/rtlsdr_ft8d
+	install ft8 /usr/local/bin/ft8
+	install ft8tx.service /etc/systemd/system/ft8tx.service
+	systemctl enable ft8tx.service
