@@ -1,6 +1,5 @@
 [Unit]
 Description=FT8 Transmitter Service
-After=multi-user.target
 
 [Service]
 ExecStart=/usr/local/bin/ft8
