@@ -518,7 +518,7 @@ void printCall(bool refresh) {
             break;
         case TX_WAITING:
             wmove(call, 0, COLS / 2);  // Y,X
-            wattrset(call, COLOR_PAIR(1) | A_BOLD);
+            wattrset(call, COLOR_PAIR(2) | A_BOLD);
             waddstr(call, txString);
             waddstr(call, editString);
             break;
