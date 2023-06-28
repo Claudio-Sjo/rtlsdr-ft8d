@@ -422,6 +422,9 @@ int main(const int argc, char *const argv[]) {
 }
 
 void handleBrokenPipe(int signo) {
+    printf("Received SIGPIPE\n");
+    close(new_socket);
+    new_socket = 0;
 }
 
 // Use the mbox interface to allocate a single chunk of memory to hold
