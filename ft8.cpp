@@ -295,6 +295,91 @@ int handleSendTx(int skt) {
     return 0;
 }
 
+// Disable the PWM clock and wait for it to become 'not busy'.
+void disable_clock() {
+    // Check if mapping has been set up yet.
+    if (peri_base_virt == NULL) {
+        return;
+    }
+    // Disable the clock (in case it's already running) by reading current
+    // settings and only clearing the enable bit.
+    auto settings = ACCESS_BUS_ADDR(CM_GP0CTL_BUS);
+    // Clear enable bit and add password
+    settings = (settings & 0x7EF) | 0x5A000000;
+    // Disable
+    ACCESS_BUS_ADDR(CM_GP0CTL_BUS) = *((int *)&settings);
+    // Wait for clock to not be busy.
+    while (true) {
+        if (!(ACCESS_BUS_ADDR(CM_GP0CTL_BUS) & (1 << 7))) {
+            break;
+        }
+    }
+}
+
+// Turn transmitter on
+void txoff() {
+    // struct GPCTL setupword = {6/*SRC*/, 0, 0, 0, 0, 1,0x5a};
+    // ACCESS_BUS_ADDR(CM_GP0CTL_BUS) = *((int*)&setupword);
+    disable_clock();
+    // turn off LED
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 26);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 25);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 24);
+    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
+}
+
+
+// Turn off (reset) DMA engine
+void unSetupDMA() {
+    // Check if mapping has been set up yet.
+    if (peri_base_virt == NULL) {
+        return;
+    }
+    // cout << "Exiting!" << std::endl;
+    struct DMAregs *DMA0 = (struct DMAregs *)&(ACCESS_BUS_ADDR(DMA_BUS_BASE));
+    DMA0->CS = 1 << 31;  // reset dma controller
+    txoff();
+}
+
+// Free the memory pool
+void deallocMemPool() {
+    if (mbox.virt_addr != NULL) {
+        unmapmem(mbox.virt_addr, mbox.pool_size * 4096);
+    }
+    if (mbox.mem_ref != 0) {
+        mem_unlock(mbox.handle, mbox.mem_ref);
+        mem_free(mbox.handle, mbox.mem_ref);
+    }
+}
+
+void setSchedPriority(int priority) {
+    // In order to get the best timing at a decent queue size, we want the kernel
+    // to avoid interrupting us for long durations.  This is done by giving our
+    // process a high priority. Note, must run as super-user for this to work.
+    struct sched_param sp;
+    sp.sched_priority = priority;
+    int ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    if (ret) {
+        std::cerr << "Warning: pthread_setschedparam (increase thread priority) returned non-zero: " << ret << std::endl;
+    }
+}
+
+// Called when exiting or when a signal is received.
+void cleanup() {
+    disable_clock();
+    unSetupDMA();
+    deallocMemPool();
+    unlink(LOCAL_DEVICE_FILE_NAME);
+}
+
+// Called when a signal is received. Automatically calls cleanup().
+void cleanupAndExit(int sig) {
+    std::cerr << "Exiting with error; caught signal: " << sig << std::endl;
+    cleanup();
+    ABORT(-1);
+}
+
+
 int main(const int argc, char *const argv[]) {
     int server_fd, valread;
     struct sockaddr address = {AF_UNIX, SOCKNAME};
@@ -310,6 +395,16 @@ int main(const int argc, char *const argv[]) {
     fd_set readfds; /* Flag for select()     */
 
     printf("%s\n\n", PROGRAM);
+
+    // catch all signals (like ctrl+c, ctrl+z, ...) to ensure DMA is disabled
+    for (int i = 0; i < 64; i++) {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = cleanupAndExit;
+        sigaction(i, &sa, NULL);
+    }
+    atexit(cleanup);
+    setSchedPriority(30);
 
     /* Set an handler for SIGPIPE */
     act.sa_handler = handleBrokenPipe;
@@ -397,6 +492,7 @@ int main(const int argc, char *const argv[]) {
                 sprintf(Txletter.ft8Message, "SEND_F8_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
                 mainFT8(argnumber, argvalue);
+                cleanup();
                 break;
             case TEST_SEND:
                 Txletter.type = SEND_ACK;
@@ -458,38 +554,6 @@ void getRealMemPageFromPool(void **vAddr, void **bAddr) {
     mbox.pool_cnt++;
 }
 
-// Free the memory pool
-void deallocMemPool() {
-    if (mbox.virt_addr != NULL) {
-        unmapmem(mbox.virt_addr, mbox.pool_size * 4096);
-    }
-    if (mbox.mem_ref != 0) {
-        mem_unlock(mbox.handle, mbox.mem_ref);
-        mem_free(mbox.handle, mbox.mem_ref);
-    }
-}
-
-// Disable the PWM clock and wait for it to become 'not busy'.
-void disable_clock() {
-    // Check if mapping has been set up yet.
-    if (peri_base_virt == NULL) {
-        return;
-    }
-    // Disable the clock (in case it's already running) by reading current
-    // settings and only clearing the enable bit.
-    auto settings = ACCESS_BUS_ADDR(CM_GP0CTL_BUS);
-    // Clear enable bit and add password
-    settings = (settings & 0x7EF) | 0x5A000000;
-    // Disable
-    ACCESS_BUS_ADDR(CM_GP0CTL_BUS) = *((int *)&settings);
-    // Wait for clock to not be busy.
-    while (true) {
-        if (!(ACCESS_BUS_ADDR(CM_GP0CTL_BUS) & (1 << 7))) {
-            break;
-        }
-    }
-}
-
 // Turn on TX
 void txon(bool LedON) {
     // Set function select for GPIO4.
@@ -536,17 +600,6 @@ void txon(bool LedON) {
     }
 }
 
-// Turn transmitter on
-void txoff() {
-    // struct GPCTL setupword = {6/*SRC*/, 0, 0, 0, 0, 1,0x5a};
-    // ACCESS_BUS_ADDR(CM_GP0CTL_BUS) = *((int*)&setupword);
-    disable_clock();
-    // turn off LED
-    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 26);
-    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 25);
-    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 24);
-    CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
-}
 
 // Transmit symbol sym for tsym seconds.
 //
@@ -629,17 +682,6 @@ void txSym(
     // printf("<instrs[bufPtr]=%x %x>",(unsigned)instrs[bufPtr].v,(unsigned)instrs[bufPtr].b);
 }
 
-// Turn off (reset) DMA engine
-void unSetupDMA() {
-    // Check if mapping has been set up yet.
-    if (peri_base_virt == NULL) {
-        return;
-    }
-    // cout << "Exiting!" << std::endl;
-    struct DMAregs *DMA0 = (struct DMAregs *)&(ACCESS_BUS_ADDR(DMA_BUS_BASE));
-    DMA0->CS = 1 << 31;  // reset dma controller
-    txoff();
-}
 
 // Truncate at bit lsb. i.e. set all bits less than lsb to zero.
 double bit_trunc(
@@ -1265,32 +1307,6 @@ void open_mbox() {
     }
 }
 
-// Called when exiting or when a signal is received.
-void cleanup() {
-    disable_clock();
-    unSetupDMA();
-    deallocMemPool();
-    unlink(LOCAL_DEVICE_FILE_NAME);
-}
-
-// Called when a signal is received. Automatically calls cleanup().
-void cleanupAndExit(int sig) {
-    std::cerr << "Exiting with error; caught signal: " << sig << std::endl;
-    cleanup();
-    ABORT(-1);
-}
-
-void setSchedPriority(int priority) {
-    // In order to get the best timing at a decent queue size, we want the kernel
-    // to avoid interrupting us for long durations.  This is done by giving our
-    // process a high priority. Note, must run as super-user for this to work.
-    struct sched_param sp;
-    sp.sched_priority = priority;
-    int ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
-    if (ret) {
-        std::cerr << "Warning: pthread_setschedparam (increase thread priority) returned non-zero: " << ret << std::endl;
-    }
-}
 
 // Create the memory map between virtual memory and the peripheral range
 // of physical memory.
@@ -1318,15 +1334,7 @@ void setup_peri_base_virt(
 }
 
 int mainFT8(const int argc, char *const argv[]) {
-    // catch all signals (like ctrl+c, ctrl+z, ...) to ensure DMA is disabled
-    for (int i = 0; i < 64; i++) {
-        struct sigaction sa;
-        memset(&sa, 0, sizeof(sa));
-        sa.sa_handler = cleanupAndExit;
-        sigaction(i, &sa, NULL);
-    }
-    atexit(cleanup);
-    setSchedPriority(30);
+
 
 #ifdef RPI1
     std::cout << "Detected Raspberry Pi version 1" << std::endl;
