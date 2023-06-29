@@ -414,7 +414,7 @@ int main(const int argc, char *const argv[]) {
         printf("Client request answered\n");
     }
     // closing the connected socket
-    close(new_socket);
+    // close(server_fd);
     new_socket = 0;
     // closing the listening socket
     shutdown(server_fd, SHUT_RDWR);
@@ -423,7 +423,6 @@ int main(const int argc, char *const argv[]) {
 
 void handleBrokenPipe(int signo) {
     printf("Received SIGPIPE\n");
-    close(new_socket);
     new_socket = 0;
 }
 
