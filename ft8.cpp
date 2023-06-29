@@ -265,11 +265,9 @@ static struct
 void handleBrokenPipe(int signo);
 int handleSendTx(int skt);
 int mainFT8(const int argc, char *const argv[]);
-void update_ppm(double &ppm);
 
 /* Variables */
 int new_socket = 0;
-double ppm = 0;
 
 int handleSendTx(int skt) {
     time_t t = time(NULL);
@@ -312,8 +310,6 @@ int main(const int argc, char *const argv[]) {
     fd_set readfds; /* Flag for select()     */
 
     printf("%s\n\n", PROGRAM);
-
-    update_ppm(ppm);
 
     /* Set an handler for SIGPIPE */
     act.sa_handler = handleBrokenPipe;
@@ -995,8 +991,8 @@ void parse_commandline(
     int &terminate) {
     double specific_freq = FT8_TXOFS;
     // Default values
-    // ppm = 0;
-    self_cal = false;
+    ppm = 0;
+    self_cal = true;
     repeat = false;
     random_offset = false;
     test_tone = NAN;
@@ -1349,7 +1345,7 @@ int mainFT8(const int argc, char *const argv[]) {
     // Parse arguments
     std::string message;
     std::vector<double> center_freq_set;
-    // double ppm;
+    double ppm;
     bool self_cal;
     bool repeat;
     bool random_offset;
