@@ -265,6 +265,7 @@ static struct
 void handleBrokenPipe(int signo);
 int handleSendTx(int skt);
 int mainFT8(const int argc, char *const argv[]);
+void update_ppm(double &ppm);
 
 /* Variables */
 int new_socket = 0;
