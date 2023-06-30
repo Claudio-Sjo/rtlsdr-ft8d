@@ -227,7 +227,7 @@ void *TXHandler(void *vargp) {
             tx_queue.erase(tx_queue.begin());
             pthread_mutex_unlock(&TXlock);
 
-            sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+            // sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
             Txletter.type = SEND_F8_REQ;
 
             if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
