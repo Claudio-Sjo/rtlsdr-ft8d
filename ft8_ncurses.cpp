@@ -294,6 +294,10 @@ void *TXHandler(void *vargp) {
 #define ENTER 10
 
 /* KBD Handler Thread */
+/*
+Time for addition of Frequency Handling: when in Freetext mode, use the local Frequency
+When in CQ answer or in QSO mode, use the frequency from the CQ or QSO
+*/
 void *KBDHandler(void *vargp) {
     static int status = IDLE;
     FT8Msg Txletter;
