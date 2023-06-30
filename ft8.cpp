@@ -51,6 +51,7 @@
 #include <sys/msg.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <wordexp.h>
 
 #include "./ft8_lib/ft8/constants.h"
 #include "./ft8_lib/ft8/pack.h"
@@ -328,7 +329,6 @@ void txoff() {
     CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
 }
 
-
 // Turn off (reset) DMA engine
 void unSetupDMA() {
     // Check if mapping has been set up yet.
@@ -378,7 +378,6 @@ void cleanupAndExit(int sig) {
     cleanup();
     ABORT(-1);
 }
-
 
 int main(const int argc, char *const argv[]) {
     int server_fd, valread;
@@ -487,11 +486,16 @@ int main(const int argc, char *const argv[]) {
         printf("%s\n", Rxletter.ft8Message);
         switch (Rxletter.type) {
             case SEND_F8_REQ:
-                string_to_argv(Rxletter.ft8Message, &argnumber, &argvalue);
+
+                // string_to_argv(Rxletter.ft8Message, &argnumber, &argvalue);
+                wordexp_t params;
+
+                wordexp(Rxletter.ft8Message,&params,WRDE_DOOFFS);
                 Txletter.type = SEND_ACK;
                 sprintf(Txletter.ft8Message, "SEND_F8_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
-                mainFT8(argnumber, argvalue);
+                // mainFT8(argnumber, argvalue);
+                mainFT8(params.we_wordc, params.we_wordv);
                 cleanup();
                 break;
             case TEST_SEND:
@@ -600,7 +604,6 @@ void txon(bool LedON) {
     }
 }
 
-
 // Transmit symbol sym for tsym seconds.
 //
 // TODO:
@@ -681,7 +684,6 @@ void txSym(
     }
     // printf("<instrs[bufPtr]=%x %x>",(unsigned)instrs[bufPtr].v,(unsigned)instrs[bufPtr].b);
 }
-
 
 // Truncate at bit lsb. i.e. set all bits less than lsb to zero.
 double bit_trunc(
@@ -1307,7 +1309,6 @@ void open_mbox() {
     }
 }
 
-
 // Create the memory map between virtual memory and the peripheral range
 // of physical memory.
 void setup_peri_base_virt(
@@ -1334,8 +1335,6 @@ void setup_peri_base_virt(
 }
 
 int mainFT8(const int argc, char *const argv[]) {
-
-
 #ifdef RPI1
     std::cout << "Detected Raspberry Pi version 1" << std::endl;
 #else
