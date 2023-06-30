@@ -644,9 +644,14 @@ void focusOnWin(int whatWin) {
     }
 }
 
+
+
+#define FORCEREFRESH    100 // in 10th of msec
+
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
     static bool termRefresh = false;
+    int dynamicRefresh = 0;
 
     while (true) {
         char key;
@@ -691,6 +696,15 @@ void *CQHandler(void *vargp) {
             printQSO(addToQSO(&qsoMsg));
         }
         /* if needed update the screen */
+        if (termRefresh)
+            dynamicRefresh = 0;
+        else
+            dynamicRefresh++;
+        if (dynamicRefresh > FORCEREFRESH) {
+            termRefresh = true;
+            dynamicRefresh = 0;
+        }
+
         printCQ(termRefresh);
         printQSO(termRefresh);
         printCall(termRefresh);
