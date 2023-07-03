@@ -1017,7 +1017,7 @@ int main(int argc, char **argv) {
     }
 
     if (rx_options.qso == true) {
-        init_ncurses();
+        init_ncurses(rx_options.dialfreq);
     }
 
     if (rx_options.selftest == false) {

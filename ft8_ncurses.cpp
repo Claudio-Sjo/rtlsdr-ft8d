@@ -59,8 +59,21 @@ int qsoFirst, qsoLast, qsoIdx;
 
 int logWLines;
 int qsoWLines;
+uint32_t qsoFreq;
+uint32_t reportedCQ;
 
-int init_ncurses() {
+int init_ncurses(uint32_t initialFreq) {
+/* 
+    Initialize the working values from the main program
+*/
+
+    qsoFreq = initialFreq + 1500; // Base freq + 1500Hz offset
+    reportedCQ = 0;
+
+/*
+    End initialization
+*/
+
     initscr();
 
     /* Hide the cursor */
@@ -325,16 +338,16 @@ void *KBDHandler(void *vargp) {
                     case ENTER:  // Activate transmission
                         switch (activeWin) {
                             case CQWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].freq , cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
                                 break;
                             case QSOWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].freq, qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
                                 break;
                             case TXWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s", editString);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s",qsoFreq, editString);
                                 break;
                             default:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+                                sprintf(Txletter.ft8Message, "FT8Tx %d SA0PRF SA0PRF JO99", qsoFreq);
                                 break;
                         }
 
