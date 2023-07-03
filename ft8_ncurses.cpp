@@ -129,11 +129,13 @@ int init_ncurses(uint32_t initialFreq) {
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
     /* Print the header */
-    mvwprintw(header, 0, 1, "SA0PRF\n");
+    mvwprintw(header, 0, 1, "%s - %s  %dHz\n", dec_options.rcall, dec_options.rloc, qsoFreq);
 
     mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 - QSO Mode\n");
 
     mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), rtlsdr_ft8d_version);
+
+    mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
 
     wattrset(logwL, A_NORMAL);
     wattrset(logwR, A_NORMAL);
