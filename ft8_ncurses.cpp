@@ -15,7 +15,7 @@
 #include "./rtlsdr_ft8d.h"
 #include "./ft8tx/FT8Types.h"
 
-extern char rtlsdr_ft8d_version[];
+extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
 extern std::vector<struct decoder_results> cq_queue;
 extern std::vector<struct plain_message> qso_queue;
@@ -133,7 +133,7 @@ int init_ncurses(uint32_t initialFreq) {
 
     mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 - QSO Mode\n");
 
-    mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), rtlsdr_ft8d_version);
+    mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), "%s",rtlsdr_ft8d_version);
 
     mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
 
