@@ -138,6 +138,7 @@ extern "C" {
 #error "RPI version macro is not defined"
 #endif
 #endif
+
 // Empirical value for F_PWM_CLK that produces FT8 symbols that are 'close' to
 // 0.16s long. For some reason, despite the use of DMA, the load on the PI
 // affects the TX length of the symbols. However, the varying symbol length is
@@ -157,6 +158,10 @@ extern "C" {
 // Choose proper base address depending on RPI1/RPI23 macro from makefile.
 // PERI_BASE_PHYS is the base address of the peripherals, in physical
 // address space.
+#ifdef RPI4
+#define PERI_BASE_PHYS 0xfe000000
+#define MEM_FLAG 0x04
+#else
 #ifdef RPI23
 #define PERI_BASE_PHYS 0x3f000000
 #define MEM_FLAG 0x04
@@ -166,6 +171,7 @@ extern "C" {
 #define MEM_FLAG 0x0ca
 #else
 #error "RPI version macro is not defined"
+#endif
 #endif
 #endif
 
