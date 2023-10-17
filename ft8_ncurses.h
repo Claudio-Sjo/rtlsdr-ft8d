@@ -2,7 +2,7 @@
 #include <curses.h>
 #include <ncurses.h>
 
-int init_ncurses();
+int init_ncurses(uint32_t);
 int close_ncurses();
 int n_printf (bool ncwin, char *prn);
 int exit_ft8(bool qsomode,int status);

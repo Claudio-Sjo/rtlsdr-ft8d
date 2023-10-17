@@ -59,8 +59,21 @@ int qsoFirst, qsoLast, qsoIdx;
 
 int logWLines;
 int qsoWLines;
+uint32_t qsoFreq;
+uint32_t reportedCQ;
 
-int init_ncurses() {
+int init_ncurses(uint32_t initialFreq) {
+/* 
+    Initialize the working values from the main program
+*/
+
+    qsoFreq = initialFreq + 1500; // Base freq + 1500Hz offset
+    reportedCQ = 0;
+
+/*
+    End initialization
+*/
+
     initscr();
 
     /* Hide the cursor */
@@ -116,11 +129,13 @@ int init_ncurses() {
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
     /* Print the header */
-    mvwprintw(header, 0, 1, "SA0PRF\n");
+    mvwprintw(header, 0, 1, "%s - %s  %dHz\n", dec_options.rcall, dec_options.rloc, qsoFreq);
 
     mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 - QSO Mode\n");
 
     mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), "%s",rtlsdr_ft8d_version);
+
+    mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
 
     wattrset(logwL, A_NORMAL);
     wattrset(logwR, A_NORMAL);
@@ -227,7 +242,7 @@ void *TXHandler(void *vargp) {
             tx_queue.erase(tx_queue.begin());
             pthread_mutex_unlock(&TXlock);
 
-            sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+            // sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
             Txletter.type = SEND_F8_REQ;
 
             if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
@@ -294,6 +309,10 @@ void *TXHandler(void *vargp) {
 #define ENTER 10
 
 /* KBD Handler Thread */
+/*
+Time for addition of Frequency Handling: when in Freetext mode, use the local Frequency
+When in CQ answer or in QSO mode, use the frequency from the CQ or QSO
+*/
 void *KBDHandler(void *vargp) {
     static int status = IDLE;
     FT8Msg Txletter;
@@ -321,16 +340,16 @@ void *KBDHandler(void *vargp) {
                     case ENTER:  // Activate transmission
                         switch (activeWin) {
                             case CQWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].freq , cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
                                 break;
                             case QSOWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].freq, qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
                                 break;
                             case TXWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m %s", editString);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s",qsoFreq, editString);
                                 break;
                             default:
-                                sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
+                                sprintf(Txletter.ft8Message, "FT8Tx %d SA0PRF SA0PRF JO99", qsoFreq);
                                 break;
                         }
 
@@ -644,9 +663,14 @@ void focusOnWin(int whatWin) {
     }
 }
 
+
+
+#define FORCEREFRESH    100 // in 10th of msec
+
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
     static bool termRefresh = false;
+    int dynamicRefresh = 0;
 
     while (true) {
         char key;
@@ -691,6 +715,15 @@ void *CQHandler(void *vargp) {
             printQSO(addToQSO(&qsoMsg));
         }
         /* if needed update the screen */
+        if (termRefresh)
+            dynamicRefresh = 0;
+        else
+            dynamicRefresh++;
+        if (dynamicRefresh > FORCEREFRESH) {
+            termRefresh = true;
+            dynamicRefresh = 0;
+        }
+
         printCQ(termRefresh);
         printQSO(termRefresh);
         printCall(termRefresh);
