@@ -90,7 +90,7 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-char rtlsdr_ft8d_version[] = "0.3.8b";
+const char *rtlsdr_ft8d_version = "0.3.8b";
 char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8b";
 
 /* Callback for each buffer received */
