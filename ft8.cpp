@@ -129,6 +129,9 @@ extern "C" {
 // the PPM correction reported by NTP and the actual frequency offset of
 // the crystal. This 2.5 PPM offset is not present in the RPi2 and RPi3.
 // This 2.5 PPM offset is compensated for here, but only for the RPi1.
+#ifdef RPI4
+#define F_PLLD_CLK   (750000000.0)
+#else
 #ifdef RPI23
 #define F_PLLD_CLK (500000000.0)
 #else
@@ -136,6 +139,7 @@ extern "C" {
 #define F_PLLD_CLK (500000000.0 * (1 - 2.500e-6))
 #else
 #error "RPI version macro is not defined"
+#endif
 #endif
 #endif
 
@@ -503,12 +507,10 @@ int main(const int argc, char *const argv[]) {
             continue;
 
         printf("%s\n", Rxletter.ft8Message);
+        wordexp_t params;
+
         switch (Rxletter.type) {
             case SEND_F8_REQ:
-
-                // string_to_argv(Rxletter.ft8Message, &argnumber, &argvalue);
-                wordexp_t params;
-
                 wordexp(Rxletter.ft8Message,&params,WRDE_DOOFFS);
                 Txletter.type = SEND_ACK;
                 sprintf(Txletter.ft8Message, "SEND_F8_REQ");
@@ -522,6 +524,15 @@ int main(const int argc, char *const argv[]) {
                 sprintf(Txletter.ft8Message, "TEST_SEND");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
                 handleSendTx(new_socket);
+                break;
+            case SEND_WSPR:
+                wordexp(Rxletter.ft8Message,&params,WRDE_DOOFFS);
+                Txletter.type = SEND_ACK;
+                sprintf(Txletter.ft8Message, "SEND_F8_REQ");
+                send(new_socket, &Txletter, sizeof(Txletter), 0);
+                // mainFT8(argnumber, argvalue);
+                mainWSPR(params.we_wordc, params.we_wordv);
+                cleanup();
                 break;
             default:
                 Txletter.type = REJECTED;

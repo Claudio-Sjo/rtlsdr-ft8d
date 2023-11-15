@@ -37,8 +37,8 @@
 #include "./rtlsdr_ft8d.h"
 
 #include "./ft8_lib/ft8/constants.h"
-#include "./ft8_lib/ft8/pack.h"
-#include "./ft8_lib/ft8/unpack.h"
+// #include "./ft8_lib/ft8/pack.h"
+// #include "./ft8_lib/ft8/unpack.h"
 #include "./ft8_lib/ft8/ldpc.h"
 #include "./ft8_lib/ft8/crc.h"
 #include "./ft8_lib/ft8/decode.h"
@@ -781,16 +781,29 @@ int32_t decoderSelfTest() {
      * FSK tones: 3140652000000001005477547106035036373140652547441342116056460065174427143140652
      */
     const char message[] = "CQ K1JT FN20QI";
+    
+    /*
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
         wprintw(logwL, "Cannot parse message!\n");
         return 0;
     }
+    */
+
+   // First, pack the text data into binary message
+    ftx_message_t msg;
+    ftx_message_rc_t rc = ftx_message_encode(&msg, NULL, message);
+    if (rc != FTX_MESSAGE_RC_OK)
+    {
+        printf("Cannot parse message!\n");
+        printf("RC = %d\n", (int)rc);
+        return -2;
+    }
 
     // Second, encode the binary message as a sequence of FSK tones
     uint8_t tones[FT8_NN];
-    ft8_encode(packed, tones);
+    ft8_encode(msg.payload, tones);
 
     // Encoding, simple FSK modulation
     float f0 = 50.0;

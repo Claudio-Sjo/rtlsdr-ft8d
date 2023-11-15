@@ -15,7 +15,8 @@ typedef enum
 	CHANGE_RTX_STATE 		= 2,
 	TEST_SEND				= 3,
 	SEND_ACK				= 4,
-	REJECTED				= 5
+	REJECTED				= 5,
+	SEND_WSPR				= 6
 } SignalType;
 
 
