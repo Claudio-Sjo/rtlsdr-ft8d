@@ -59,7 +59,7 @@
 #define LOG_INFO 1
 #define LOG_WARN 2
 #define LOG_ERROR 3
-#define LOG_LEVEL LOG_ERROR
+#define LOG_LEVEL LOG_DEBUG
 #define LOG(level, ...) \
     if (level >= LOG_LEVEL) fprintf(stderr, __VA_ARGS__)
 

@@ -843,11 +843,106 @@ int32_t decoderSelfTest() {
 }
 
 
-void decode(const monitor_t *mon, struct tm *tm_slot_start,struct decoder_results *decodes,int32_t *n_results) {
+#define CALLSIGN_HASHTABLE_SIZE 256
+
+static struct
+{
+    char callsign[12]; ///> Up to 11 symbols of callsign + trailing zeros (always filled)
+    uint32_t hash;     ///> 8 MSBs contain the age of callsign; 22 LSBs contain hash value
+} callsign_hashtable[CALLSIGN_HASHTABLE_SIZE];
+
+static int callsign_hashtable_size;
+
+void hashtable_init(void)
+{
+    callsign_hashtable_size = 0;
+    memset(callsign_hashtable, 0, sizeof(callsign_hashtable));
+}
+
+void hashtable_cleanup(uint8_t max_age)
+{
+    for (int idx_hash = 0; idx_hash < CALLSIGN_HASHTABLE_SIZE; ++idx_hash)
+    {
+        if (callsign_hashtable[idx_hash].callsign[0] != '\0')
+        {
+            uint8_t age = (uint8_t)(callsign_hashtable[idx_hash].hash >> 24);
+            if (age > max_age)
+            {
+                LOG(LOG_INFO, "Removing [%s] from hash table, age = %d\n", callsign_hashtable[idx_hash].callsign, age);
+                // free the hash entry
+                callsign_hashtable[idx_hash].callsign[0] = '\0';
+                callsign_hashtable[idx_hash].hash = 0;
+                callsign_hashtable_size--;
+            }
+            else
+            {
+                // increase callsign age
+                callsign_hashtable[idx_hash].hash = (((uint32_t)age + 1u) << 24) | (callsign_hashtable[idx_hash].hash & 0x3FFFFFu);
+            }
+        }
+    }
+}
+
+void hashtable_add(const char* callsign, uint32_t hash)
+{
+    uint16_t hash10 = (hash >> 12) & 0x3FFu;
+    int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
+    while (callsign_hashtable[idx_hash].callsign[0] != '\0')
+    {
+        if (((callsign_hashtable[idx_hash].hash & 0x3FFFFFu) == hash) && (0 == strcmp(callsign_hashtable[idx_hash].callsign, callsign)))
+        {
+            // reset age
+            callsign_hashtable[idx_hash].hash &= 0x3FFFFFu;
+            LOG(LOG_DEBUG, "Found a duplicate [%s]\n", callsign);
+            return;
+        }
+        else
+        {
+            LOG(LOG_DEBUG, "Hash table clash!\n");
+            // Move on to check the next entry in hash table
+            idx_hash = (idx_hash + 1) % CALLSIGN_HASHTABLE_SIZE;
+        }
+    }
+    callsign_hashtable_size++;
+    strncpy(callsign_hashtable[idx_hash].callsign, callsign, 11);
+    callsign_hashtable[idx_hash].callsign[11] = '\0';
+    callsign_hashtable[idx_hash].hash = hash;
+}
+
+bool hashtable_lookup(ftx_callsign_hash_type_t hash_type, uint32_t hash, char* callsign)
+{
+    uint8_t hash_shift = (hash_type == FTX_CALLSIGN_HASH_10_BITS) ? 12 : (hash_type == FTX_CALLSIGN_HASH_12_BITS ? 10 : 0);
+    uint16_t hash10 = (hash >> (12 - hash_shift)) & 0x3FFu;
+    int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
+    while (callsign_hashtable[idx_hash].callsign[0] != '\0')
+    {
+        if (((callsign_hashtable[idx_hash].hash & 0x3FFFFFu) >> hash_shift) == hash)
+        {
+            strcpy(callsign, callsign_hashtable[idx_hash].callsign);
+            return true;
+        }
+        // Move on to check the next entry in hash table
+        idx_hash = (idx_hash + 1) % CALLSIGN_HASHTABLE_SIZE;
+    }
+    callsign[0] = '\0';
+    return false;
+}
+
+
+ftx_callsign_hash_interface_t hash_if = {
+    .lookup_hash = hashtable_lookup,
+    .save_hash = hashtable_add
+};
+
+
+void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
     const ftx_waterfall_t *wf = &mon->wf;
     // Find top candidates by Costas sync score and localize them in time and frequency
     ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
     int num_candidates = ftx_find_candidates(wf, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+
+    // wprintw(logwL, "Found %d candidates\n", num_candidates);
+    // wrefresh(logwL);
 
     // Hash table for decoded messages (to check for duplicates)
     int num_decoded = 0;
@@ -884,62 +979,83 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start,struct decoder_result
         if (!ftx_decode_candidate(wf, cand, K_LDPC_ITERS, &message, &status)) {
             if (status.ldpc_errors > 0) {
                 LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // wprintw(logwL, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // wrefresh(logwL);
             } else if (status.crc_calculated != status.crc_extracted) {
                 LOG(LOG_DEBUG, "CRC mismatch!\n");
+                // wprintw(logwL, "CRC mismatch!\n");
+                // wrefresh(logwL);
             }
             continue;
         }
 
         LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // wprintw(logwL, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // wrefresh(logwL);
+
         int idx_hash = message.hash % K_MAX_MESSAGES;
         bool found_empty_slot = false;
         bool found_duplicate = false;
         do {
             if (decoded_hashtable[idx_hash] == NULL) {
                 LOG(LOG_DEBUG, "Found an empty slot\n");
+                // wprintw(logwL, "Found an empty slot\n");
+
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
                 LOG(LOG_DEBUG, "Found a duplicate!\n");
+                // wprintw(logwL, "Found a duplicate!\n");
+
                 found_duplicate = true;
             } else {
                 LOG(LOG_DEBUG, "Hash table clash!\n");
+                // wprintw(logwL, "Hash table clash!\n");
+
                 // Move on to check the next entry in hash table
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
+            // wrefresh(logwL);
+
         } while (!found_empty_slot && !found_duplicate);
 
-/*
+        /*
+                if (found_empty_slot) {
+                    // Fill the empty hashtable slot
+                    memcpy(&decoded[idx_hash], &message, sizeof(message));
+                    decoded_hashtable[idx_hash] = &decoded[idx_hash];
+                    ++num_decoded;
+
+                    char text[FTX_MAX_MESSAGE_LENGTH];
+                    ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
+                    if (unpack_status != FTX_MESSAGE_RC_OK) {
+                        snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);
+                    }
+
+                    // Fake WSJT-X-like output for now
+                    float snr = cand->score * 0.5f;  // TODO: compute better approximation of SNR
+                    printf("%02d%02d%02d %+05.1f %+4.2f %4.0f ~  %s\n",
+                           tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
+                           snr, time_sec, freq_hz, text);
+                }
+        */
+        /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
-            // Fill the empty hashtable slot
+            char msgToPrint[FTX_MAX_MESSAGE_LENGTH];
+            char msgToLog[FTX_MAX_MESSAGE_LENGTH];
+
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
-            ++num_decoded;
 
             char text[FTX_MAX_MESSAGE_LENGTH];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
-            if (unpack_status != FTX_MESSAGE_RC_OK) {
-                snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);
-            }
 
-            // Fake WSJT-X-like output for now
-            float snr = cand->score * 0.5f;  // TODO: compute better approximation of SNR
-            printf("%02d%02d%02d %+05.1f %+4.2f %4.0f ~  %s\n",
-                   tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
-                   snr, time_sec, freq_hz, text);
-        }
-*/
-        /* Add this entry to an empty hashtable slot */
-        if (found_empty_slot) {
-            char msgToPrint[32];
-            char msgToLog[32];
+            snprintf(msgToPrint, FTX_MAX_MESSAGE_LENGTH, "%s", text);
+            snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
 
-            memcpy(&decoded[idx_hash], &message, sizeof(message));
-            decoded_hashtable[idx_hash] = &decoded[idx_hash];
+            // wprintw(logwL, "Message to print: %s\n", msgToPrint);
+            // wrefresh(logwL);
 
-            snprintf(msgToPrint, sizeof(msgToPrint), "%s", message.payload);
-            snprintf(msgToLog, sizeof(msgToLog), "%s", message.payload);
-
-            char *strPtr = strtok((char *) message.payload, " ");
+            char *strPtr = strtok((char *)text, " ");
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
@@ -1009,11 +1125,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start,struct decoder_result
 
             // wrefresh(logwL);
         }
-
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     *n_results = num_decoded;
-
 }
 
 void usage(FILE *stream, int32_t status) {
@@ -1376,6 +1490,9 @@ int main(int argc, char **argv) {
     else
         wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
+
+    hashtable_init();
+
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
@@ -1467,6 +1584,69 @@ void ft8_subsystem(float *iSamples,
     // UPDATE: adjust with samples_len !!
 
     // Compute FFT over the whole signal and store it
+    uint8_t mag_power[MAG_ARRAY];
+
+    int offset = 0;
+    float max_mag = -120.0f;
+
+    for (int idx_block = 0; idx_block < NUM_BLOCKS; ++idx_block) {
+        // Loop over two possible time offsets (0 and BLOCK_SIZE/2)
+        for (int time_sub = 0; time_sub < K_TIME_OSR; ++time_sub) {
+            float mag_db[NFFT];
+
+            // UPDATE : try FFT over 2 symbols, stepped by half symbols
+            for (int i = 0; i < NFFT; ++i) {
+                fft_in[i][0] = iSamples[(idx_block * BLOCK_SIZE) + (time_sub * SUB_BLOCK_SIZE) + i] * hann[i];
+                fft_in[i][1] = qSamples[(idx_block * BLOCK_SIZE) + (time_sub * SUB_BLOCK_SIZE) + i] * hann[i];
+            }
+            fftwf_execute(fft_plan);
+
+            // Compute log magnitude in decibels
+            for (int i = 0; i < NFFT; ++i) {
+                float mag2 = fft_out[i][0] * fft_out[i][0] + fft_out[i][1] * fft_out[i][1];
+                mag_db[i] = 10.0f * log10f(1E-12f + mag2 * 4.0f / (NFFT * NFFT));
+            }
+
+            // Loop over two possible frequency bin offsets (for averaging)
+            for (int freq_sub = 0; freq_sub < K_FREQ_OSR; ++freq_sub) {
+                for (int pos = 0; pos < NUM_BIN; ++pos) {
+                    float db = mag_db[pos * K_FREQ_OSR + freq_sub];
+                    // Scale decibels to unsigned 8-bit range and clamp the value
+                    // Range 0-240 covers -120..0 dB in 0.5 dB steps
+                    int scaled = (int)(2 * db + 240);
+
+                    mag_power[offset] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
+                    ++offset;
+
+                    if (db > max_mag)
+                        max_mag = db;
+                }
+            }
+        }
+    }
+
+    /* Find top candidates by Costas sync score and localize them in time and frequency
+    ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
+
+    ftx_waterfall_t power = {
+    .num_blocks = NUM_BLOCKS,
+    .num_bins = NUM_BIN,
+    .time_osr = K_TIME_OSR,
+    .freq_osr = K_FREQ_OSR,
+    .mag = mag_power,
+    .block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN),
+    .protocol = FTX_PROTOCOL_FT8};
+
+
+
+int num_candidates = ftx_find_candidates(&power, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+
+        wprintw(logwL, "Looking or candidates\n");
+
+wprintw(logwL, "Found %d candidates\n", num_candidates);
+wrefresh(logwL);
+*/
+
     monitor_t mon;
     monitor_config_t mon_cfg = {
         .f_min = 200,
@@ -1476,28 +1656,26 @@ void ft8_subsystem(float *iSamples,
         .freq_osr = K_FREQ_OSR,
         .protocol = FTX_PROTOCOL_FT8};
 
-    monitor_init(&mon, &mon_cfg);
-    LOG(LOG_DEBUG, "Waterfall allocated %d symbols\n", mon.wf.max_blocks);
+    float symbol_period = (mon_cfg.protocol == FTX_PROTOCOL_FT4) ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
 
-    struct tm tm_slot_start = {0};
+    mon.min_bin = (int)(mon_cfg.f_min * symbol_period);
+    mon.max_bin = (int)(mon_cfg.f_max * symbol_period) + 1;
+    const int num_bins = mon.max_bin - mon.min_bin;
 
-    // Process and accumulate audio data in a monitor/waterfall instance
-    for (int idx_block = 0; idx_block < NUM_BLOCKS; ++idx_block) {
-        for (int time_sub = 0; time_sub < K_TIME_OSR; ++time_sub) {
-            for (int i = 0; i < NFFT; ++i) {
-                float signal = iSamples[(idx_block * BLOCK_SIZE) + (time_sub * SUB_BLOCK_SIZE) + i];
-                // Process the waveform data frame by frame - you could have a live loop here with data from an audio device
-                monitor_process(&mon, &signal);  // insert a single floating point value at a time
-            }
-        }
-    }
+    // waterfall_init(&me->wf, max_blocks, num_bins, mon_cfg.time_osr, mon_cfg.freq_osr);
+    mon.wf.protocol = mon_cfg.protocol;
 
-    // Decode accumulated data (containing slightly less than a full time slot)
-    decode(&mon, &tm_slot_start, decodes, n_results);
+    mon.symbol_period = symbol_period;
 
-    // Reset internal variables for the next time slot
-    monitor_reset(&mon);
+    mon.max_mag = -120.0f;
 
-    monitor_free(&mon);
+    mon.wf.num_blocks = NUM_BLOCKS;
+    mon.wf.num_bins = NUM_BIN;
+    mon.wf.time_osr = K_TIME_OSR;
+    mon.wf.freq_osr = K_FREQ_OSR;
+    mon.wf.mag = mag_power;
+    mon.wf.block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN);
+    mon.wf.protocol = FTX_PROTOCOL_FT8;
 
+    decode(&mon, NULL, decodes, n_results);
 }
