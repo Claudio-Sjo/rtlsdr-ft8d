@@ -34,18 +34,19 @@
 #include <netdb.h>
 #include <curl/curl.h>
 
-#include "./rtlsdr_ft8d.h"
+#include <rtlsdr_ft8d.h>
 
-#include "./ft8_lib/ft8/constants.h"
-#include "./ft8_lib/ft8/pack.h"
-#include "./ft8_lib/ft8/unpack.h"
-#include "./ft8_lib/ft8/ldpc.h"
-#include "./ft8_lib/ft8/crc.h"
-#include "./ft8_lib/ft8/decode.h"
-#include "./ft8_lib/ft8/encode.h"
+#include <ft8/constants.h>
+#include <ft8/ldpc.h>
+#include <ft8/crc.h>
+#include <ft8/decode.h>
+#include <ft8/encode.h>
+#include <common/wave.h>
+#include <common/monitor.h>
+#include <common/audio.h>
 
-#include "pskreporter.hpp"
-#include "ft8_ncurses.h"
+#include <pskreporter.hpp>
+#include <ft8_ncurses.h>
 
 /* Defines for debug */
 // #define TXWINTEST
@@ -90,8 +91,8 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.3.8b";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.3.8b";
+const char *rtlsdr_ft8d_version = "0.4.0";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.4.0";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -781,16 +782,28 @@ int32_t decoderSelfTest() {
      * FSK tones: 3140652000000001005477547106035036373140652547441342116056460065174427143140652
      */
     const char message[] = "CQ K1JT FN20QI";
+
+    /*
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
         wprintw(logwL, "Cannot parse message!\n");
         return 0;
     }
+    */
+
+    // First, pack the text data into binary message
+    ftx_message_t msg;
+    ftx_message_rc_t rc = ftx_message_encode(&msg, NULL, message);
+    if (rc != FTX_MESSAGE_RC_OK) {
+        printf("Cannot parse message!\n");
+        printf("RC = %d\n", (int)rc);
+        return -2;
+    }
 
     // Second, encode the binary message as a sequence of FSK tones
     uint8_t tones[FT8_NN];
-    ft8_encode(packed, tones);
+    ft8_encode(msg.payload, tones);
 
     // Encoding, simple FSK modulation
     float f0 = 50.0;
@@ -827,6 +840,294 @@ int32_t decoderSelfTest() {
     } else {
         return 1;
     }
+}
+
+
+#define CALLSIGN_HASHTABLE_SIZE 256
+
+static struct
+{
+    char callsign[12]; ///> Up to 11 symbols of callsign + trailing zeros (always filled)
+    uint32_t hash;     ///> 8 MSBs contain the age of callsign; 22 LSBs contain hash value
+} callsign_hashtable[CALLSIGN_HASHTABLE_SIZE];
+
+static int callsign_hashtable_size;
+
+void hashtable_init(void)
+{
+    callsign_hashtable_size = 0;
+    memset(callsign_hashtable, 0, sizeof(callsign_hashtable));
+}
+
+void hashtable_cleanup(uint8_t max_age)
+{
+    for (int idx_hash = 0; idx_hash < CALLSIGN_HASHTABLE_SIZE; ++idx_hash)
+    {
+        if (callsign_hashtable[idx_hash].callsign[0] != '\0')
+        {
+            uint8_t age = (uint8_t)(callsign_hashtable[idx_hash].hash >> 24);
+            if (age > max_age)
+            {
+                LOG(LOG_INFO, "Removing [%s] from hash table, age = %d\n", callsign_hashtable[idx_hash].callsign, age);
+                // free the hash entry
+                callsign_hashtable[idx_hash].callsign[0] = '\0';
+                callsign_hashtable[idx_hash].hash = 0;
+                callsign_hashtable_size--;
+            }
+            else
+            {
+                // increase callsign age
+                callsign_hashtable[idx_hash].hash = (((uint32_t)age + 1u) << 24) | (callsign_hashtable[idx_hash].hash & 0x3FFFFFu);
+            }
+        }
+    }
+}
+
+void hashtable_add(const char* callsign, uint32_t hash)
+{
+    uint16_t hash10 = (hash >> 12) & 0x3FFu;
+    int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
+    while (callsign_hashtable[idx_hash].callsign[0] != '\0')
+    {
+        if (((callsign_hashtable[idx_hash].hash & 0x3FFFFFu) == hash) && (0 == strcmp(callsign_hashtable[idx_hash].callsign, callsign)))
+        {
+            // reset age
+            callsign_hashtable[idx_hash].hash &= 0x3FFFFFu;
+            LOG(LOG_DEBUG, "Found a duplicate [%s]\n", callsign);
+            return;
+        }
+        else
+        {
+            LOG(LOG_DEBUG, "Hash table clash!\n");
+            // Move on to check the next entry in hash table
+            idx_hash = (idx_hash + 1) % CALLSIGN_HASHTABLE_SIZE;
+        }
+    }
+    callsign_hashtable_size++;
+    strncpy(callsign_hashtable[idx_hash].callsign, callsign, 11);
+    callsign_hashtable[idx_hash].callsign[11] = '\0';
+    callsign_hashtable[idx_hash].hash = hash;
+}
+
+bool hashtable_lookup(ftx_callsign_hash_type_t hash_type, uint32_t hash, char* callsign)
+{
+    uint8_t hash_shift = (hash_type == FTX_CALLSIGN_HASH_10_BITS) ? 12 : (hash_type == FTX_CALLSIGN_HASH_12_BITS ? 10 : 0);
+    uint16_t hash10 = (hash >> (12 - hash_shift)) & 0x3FFu;
+    int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
+    while (callsign_hashtable[idx_hash].callsign[0] != '\0')
+    {
+        if (((callsign_hashtable[idx_hash].hash & 0x3FFFFFu) >> hash_shift) == hash)
+        {
+            strcpy(callsign, callsign_hashtable[idx_hash].callsign);
+            return true;
+        }
+        // Move on to check the next entry in hash table
+        idx_hash = (idx_hash + 1) % CALLSIGN_HASHTABLE_SIZE;
+    }
+    callsign[0] = '\0';
+    return false;
+}
+
+
+ftx_callsign_hash_interface_t hash_if = {
+    .lookup_hash = hashtable_lookup,
+    .save_hash = hashtable_add
+};
+
+
+void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
+    const ftx_waterfall_t *wf = &mon->wf;
+    // Find top candidates by Costas sync score and localize them in time and frequency
+    ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
+    int num_candidates = ftx_find_candidates(wf, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+
+    // wprintw(logwL, "Found %d candidates\n", num_candidates);
+    // wrefresh(logwL);
+
+    // Hash table for decoded messages (to check for duplicates)
+    int num_decoded = 0;
+    ftx_message_t decoded[K_MAX_MESSAGES];
+    ftx_message_t *decoded_hashtable[K_MAX_MESSAGES];
+
+    // Initialize hash table pointers
+    for (int i = 0; i < K_MAX_MESSAGES; ++i) {
+        decoded_hashtable[i] = NULL;
+    }
+
+    // Go over candidates and attempt to decode messages
+    for (int idx = 0; idx < num_candidates; ++idx) {
+        const ftx_candidate_t *cand = &candidate_list[idx];
+
+        float freq_hz = (mon->min_bin + cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
+        float time_sec = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
+
+#ifdef WATERFALL_USE_PHASE
+        // int resynth_len = 12000 * 16;
+        // float resynth_signal[resynth_len];
+        // for (int pos = 0; pos < resynth_len; ++pos)
+        // {
+        //     resynth_signal[pos] = 0;
+        // }
+        // monitor_resynth(mon, cand, resynth_signal);
+        // char resynth_path[80];
+        // sprintf(resynth_path, "resynth_%04f_%02.1f.wav", freq_hz, time_sec);
+        // save_wav(resynth_signal, resynth_len, 12000, resynth_path);
+#endif
+
+        ftx_message_t message;
+        ftx_decode_status_t status;
+        if (!ftx_decode_candidate(wf, cand, K_LDPC_ITERS, &message, &status)) {
+            if (status.ldpc_errors > 0) {
+                LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // wprintw(logwL, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // wrefresh(logwL);
+            } else if (status.crc_calculated != status.crc_extracted) {
+                LOG(LOG_DEBUG, "CRC mismatch!\n");
+                // wprintw(logwL, "CRC mismatch!\n");
+                // wrefresh(logwL);
+            }
+            continue;
+        }
+
+        LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // wprintw(logwL, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // wrefresh(logwL);
+
+        int idx_hash = message.hash % K_MAX_MESSAGES;
+        bool found_empty_slot = false;
+        bool found_duplicate = false;
+        do {
+            if (decoded_hashtable[idx_hash] == NULL) {
+                LOG(LOG_DEBUG, "Found an empty slot\n");
+                // wprintw(logwL, "Found an empty slot\n");
+
+                found_empty_slot = true;
+            } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
+                LOG(LOG_DEBUG, "Found a duplicate!\n");
+                // wprintw(logwL, "Found a duplicate!\n");
+
+                found_duplicate = true;
+            } else {
+                LOG(LOG_DEBUG, "Hash table clash!\n");
+                // wprintw(logwL, "Hash table clash!\n");
+
+                // Move on to check the next entry in hash table
+                idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
+            }
+            // wrefresh(logwL);
+
+        } while (!found_empty_slot && !found_duplicate);
+
+        /*
+                if (found_empty_slot) {
+                    // Fill the empty hashtable slot
+                    memcpy(&decoded[idx_hash], &message, sizeof(message));
+                    decoded_hashtable[idx_hash] = &decoded[idx_hash];
+                    ++num_decoded;
+
+                    char text[FTX_MAX_MESSAGE_LENGTH];
+                    ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
+                    if (unpack_status != FTX_MESSAGE_RC_OK) {
+                        snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);
+                    }
+
+                    // Fake WSJT-X-like output for now
+                    float snr = cand->score * 0.5f;  // TODO: compute better approximation of SNR
+                    printf("%02d%02d%02d %+05.1f %+4.2f %4.0f ~  %s\n",
+                           tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
+                           snr, time_sec, freq_hz, text);
+                }
+        */
+        /* Add this entry to an empty hashtable slot */
+        if (found_empty_slot) {
+            char msgToPrint[FTX_MAX_MESSAGE_LENGTH];
+            char msgToLog[FTX_MAX_MESSAGE_LENGTH];
+
+            memcpy(&decoded[idx_hash], &message, sizeof(message));
+            decoded_hashtable[idx_hash] = &decoded[idx_hash];
+
+            char text[FTX_MAX_MESSAGE_LENGTH];
+            ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
+
+            snprintf(msgToPrint, FTX_MAX_MESSAGE_LENGTH, "%s", text);
+            snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
+
+            // wprintw(logwL, "Message to print: %s\n", msgToPrint);
+            // wrefresh(logwL);
+
+            char *strPtr = strtok((char *)text, " ");
+            if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
+
+                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
+
+                pthread_mutex_lock(&msglock);  // Protect decodes structure
+
+                sprintf(decodes[num_decoded].cmd, "CQ   ");
+                // If what follows CQ is 2 chars then we keep it in CQ command
+                if (2 == strlen(strPtr)) {
+                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
+                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
+                }
+                /*
+                if (!strncmp(strPtr, "DX", 2)) {
+                    sprintf(decodes[num_decoded].cmd, "CQ DX");
+                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
+                }
+                */
+
+                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
+                strPtr = strtok(NULL, " ");  // Move on the Locator part
+                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
+
+                decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
+                decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+                pthread_mutex_unlock(&msglock);
+
+                num_decoded++;
+            } else {
+                if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
+                    struct plain_message qsoMsg;
+
+                    char *dst = strPtr;
+                    char *src = strtok(NULL, " ");
+                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
+                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL, " \n"));
+
+                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                }
+            }
+            struct plain_message logMsg;
+
+            strPtr = strtok(msgToLog, " ");
+
+            char *dst = strPtr;
+            char *src = strtok(NULL, " ");
+            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src);
+            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst);
+            snprintf(logMsg.message, sizeof(logMsg.message), "%s", strtok(NULL, " \n"));
+
+            logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+            logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+            pthread_mutex_lock(&LOGlock);  // Protect decodes structure
+            log_queue.push_back(logMsg);
+
+            pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
+
+            // wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
+
+            // wrefresh(logwL);
+        }
+    }
+    // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
+    *n_results = num_decoded;
 }
 
 void usage(FILE *stream, int32_t status) {
@@ -1189,6 +1490,9 @@ int main(int argc, char **argv) {
     else
         wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
+
+    hashtable_init();
+
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
     uint32_t sec = lTime.tv_sec % 15;
@@ -1279,7 +1583,7 @@ void ft8_subsystem(float *iSamples,
                    int32_t *n_results) {
     // UPDATE: adjust with samples_len !!
 
-    /* Compute FFT over the whole signal and store it */
+    // Compute FFT over the whole signal and store it
     uint8_t mag_power[MAG_ARRAY];
 
     int offset = 0;
@@ -1320,154 +1624,58 @@ void ft8_subsystem(float *iSamples,
             }
         }
     }
-    // fprintf(stderr, "Max magnitude: %.1f dB\n", max_mag);
 
-    /* Find top candidates by Costas sync score and localize them in time and frequency */
-    candidate_t candidate_list[K_MAX_CANDIDATES];
-    waterfall_t power = {
-        .num_blocks = NUM_BLOCKS,
-        .num_bins = NUM_BIN,
+    /* Find top candidates by Costas sync score and localize them in time and frequency
+    ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
+
+    ftx_waterfall_t power = {
+    .num_blocks = NUM_BLOCKS,
+    .num_bins = NUM_BIN,
+    .time_osr = K_TIME_OSR,
+    .freq_osr = K_FREQ_OSR,
+    .mag = mag_power,
+    .block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN),
+    .protocol = FTX_PROTOCOL_FT8};
+
+
+
+int num_candidates = ftx_find_candidates(&power, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+
+        wprintw(logwL, "Looking or candidates\n");
+
+wprintw(logwL, "Found %d candidates\n", num_candidates);
+wrefresh(logwL);
+*/
+
+    monitor_t mon;
+    monitor_config_t mon_cfg = {
+        .f_min = 200,
+        .f_max = 3000,
+        .sample_rate = SIGNAL_SAMPLE_RATE,
         .time_osr = K_TIME_OSR,
         .freq_osr = K_FREQ_OSR,
-        .mag = mag_power,
-        .block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN),
-        .protocol = PROTO_FT8};
+        .protocol = FTX_PROTOCOL_FT8};
 
-    int num_candidates = ft8_find_sync(&power, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+    float symbol_period = (mon_cfg.protocol == FTX_PROTOCOL_FT4) ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
 
-    // Hash table for decoded messages (to check for duplicates)
-    int num_decoded = 0;
-    message_t decoded[K_MAX_MESSAGES];
-    message_t *decoded_hashtable[K_MAX_MESSAGES];
+    mon.min_bin = (int)(mon_cfg.f_min * symbol_period);
+    mon.max_bin = (int)(mon_cfg.f_max * symbol_period) + 1;
+    const int num_bins = mon.max_bin - mon.min_bin;
 
-    // Initialize hash table pointers
-    for (int i = 0; i < K_MAX_MESSAGES; ++i) {
-        decoded_hashtable[i] = NULL;
-    }
+    // waterfall_init(&me->wf, max_blocks, num_bins, mon_cfg.time_osr, mon_cfg.freq_osr);
+    mon.wf.protocol = mon_cfg.protocol;
 
-    // fprintf(stdout, "SNR  DT   Freq ~ Message\n");
+    mon.symbol_period = symbol_period;
 
-    // Go over candidates and attempt to decode messages
-    for (int idx = 0; idx < num_candidates; ++idx) {
-        const candidate_t *cand = &candidate_list[idx];
-        if (cand->score < K_MIN_SCORE)
-            continue;
+    mon.max_mag = -120.0f;
 
-        float freq_hz = (cand->freq_offset + (float)cand->freq_sub / K_FREQ_OSR) * K_FSK_DEV;
-        // float time_sec = (cand->time_offset + (float)cand->time_sub / K_TIME_OSR) / K_FSK_DEV;
-        // fprintf(stderr, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+    mon.wf.num_blocks = NUM_BLOCKS;
+    mon.wf.num_bins = NUM_BIN;
+    mon.wf.time_osr = K_TIME_OSR;
+    mon.wf.freq_osr = K_FREQ_OSR;
+    mon.wf.mag = mag_power;
+    mon.wf.block_stride = (K_TIME_OSR * K_FREQ_OSR * NUM_BIN);
+    mon.wf.protocol = FTX_PROTOCOL_FT8;
 
-        message_t message;
-        decode_status_t status;
-        if (!ft8_decode(&power, cand, &message, K_LDPC_ITERS, &status)) {
-            if (status.ldpc_errors > 0) {
-                // fprintf(stderr, "LDPC decode: %d errors\n", status.ldpc_errors);
-            } else if (status.crc_calculated != status.crc_extracted) {
-                // fprintf(stderr, "CRC mismatch!\n");
-            } else if (status.unpack_status != 0) {
-                // fprintf(stderr, "Error while unpacking!\n");
-            }
-            continue;
-        }
-
-        int idx_hash = message.hash % K_MAX_MESSAGES;
-        bool found_empty_slot = false;
-        bool found_duplicate = false;
-        do {
-            if (decoded_hashtable[idx_hash] == NULL) {
-                // fprintf(stderr, "Found an empty slot\n");
-                found_empty_slot = true;
-            } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == strcmp(decoded_hashtable[idx_hash]->text, message.text))) {
-                // fprintf(stderr, "Found a duplicate [%s]\n", message.text);
-                found_duplicate = true;
-            } else {
-                // fprintf(stderr, "Hash table clash!\n");
-                //  Move on to check the next entry in hash table
-                idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
-            }
-        } while (!found_empty_slot && !found_duplicate);
-
-        /* Add this entry to an empty hashtable slot */
-        if (found_empty_slot) {
-            char msgToPrint[32];
-            char msgToLog[32];
-
-            memcpy(&decoded[idx_hash], &message, sizeof(message));
-            decoded_hashtable[idx_hash] = &decoded[idx_hash];
-
-            snprintf(msgToPrint, sizeof(msgToPrint), "%s", message.text);
-            snprintf(msgToLog, sizeof(msgToLog), "%s", message.text);
-
-            char *strPtr = strtok(message.text, " ");
-            if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
-
-                strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
-
-                pthread_mutex_lock(&msglock);  // Protect decodes structure
-
-                sprintf(decodes[num_decoded].cmd, "CQ   ");
-                // If what follows CQ is 2 chars then we keep it in CQ command
-                if (2 == strlen(strPtr)) {
-                    sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
-                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
-                }
-                /*
-                if (!strncmp(strPtr, "DX", 2)) {
-                    sprintf(decodes[num_decoded].cmd, "CQ DX");
-                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
-                }
-                */
-
-                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
-                strPtr = strtok(NULL, " ");  // Move on the Locator part
-                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
-
-                decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-                decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-
-                pthread_mutex_unlock(&msglock);
-
-                num_decoded++;
-            } else {
-                if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
-                    struct plain_message qsoMsg;
-
-                    char *dst = strPtr;
-                    char *src = strtok(NULL, " ");
-                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
-                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
-                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL, " \n"));
-
-                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
-                }
-            }
-            struct plain_message logMsg;
-
-            strPtr = strtok(msgToLog, " ");
-
-            char *dst = strPtr;
-            char *src = strtok(NULL, " ");
-            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src);
-            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst);
-            snprintf(logMsg.message, sizeof(logMsg.message), "%s", strtok(NULL, " \n"));
-
-            logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-            logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-
-            pthread_mutex_lock(&LOGlock);  // Protect decodes structure
-            log_queue.push_back(logMsg);
-
-            pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
-
-            // wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
-
-            // wrefresh(logwL);
-        }
-    }
-    *n_results = num_decoded;
+    decode(&mon, NULL, decodes, n_results);
 }
