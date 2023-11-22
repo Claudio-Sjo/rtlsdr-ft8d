@@ -11,7 +11,9 @@
 
 This project aim at decoding [FT8](https://en.wikipedia.org/wiki/WSJT_(amateur_radio_software)#FT8) signals using an [RTL device](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr), usually connected to a [Raspberry Pi](https://www.raspberrypi.org/) and exploiting the RPi for generating the FT8 signal.
 Note that it requires proper License and HW for fulfilling the relevant rules.
-To install and use your dongle on a Raspberry Pi with a Raspberry Pi OS, follow these steps:
+To install and use your dongle on a Raspberry Pi with a Raspberry Pi OS, follow these steps but
+first be sure that the proper firmware is up to date, if not run
+# sudo rp-update
 
 ```bash
 echo "== Install dependencies"
@@ -31,7 +33,7 @@ echo "== Install rtlsdr-ft8d"
 git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
 cd rtlsdr-ft8d
 git clone https://github.com/kgoba/ft8_lib
-# git submodule update --init --recursive
+git submodule update --init --recursive
 make
 sudo make install
 
