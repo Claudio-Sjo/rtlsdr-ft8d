@@ -26,6 +26,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include <time.h>
 #include <pthread.h>
 #include <assert.h>
 #include <rtl-sdr.h>
@@ -91,8 +92,8 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.4.0";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.4.0";
+const char *rtlsdr_ft8d_version = "0.4.1";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.4.1";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -520,6 +521,7 @@ void printSpots(uint32_t n_results) {
         snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
+        dr.tempus = time(NULL);
         cq_queue.push_back(dr);
 
         pthread_mutex_unlock(&CQlock);   // Protect decodes structure
@@ -1115,6 +1117,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
             logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+            logMsg.tempus = time(NULL);
 
             pthread_mutex_lock(&LOGlock);  // Protect decodes structure
             log_queue.push_back(logMsg);

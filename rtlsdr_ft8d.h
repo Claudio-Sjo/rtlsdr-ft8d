@@ -20,6 +20,8 @@
 #pragma once
 
 #include <unistd.h>
+#include <sys/time.h>
+#include <time.h>
 
 /* Sampling definition for RTL devices & FT8 protocol */
 #define SIGNAL_LENGHT 15
@@ -133,6 +135,7 @@ struct decoder_results {
     char loc[7];
     int32_t freq;
     int32_t snr;
+    time_t tempus;
 };
 
 struct plain_message {
@@ -141,6 +144,7 @@ struct plain_message {
     char message[40];
     int32_t freq;
     int32_t snr;
+    time_t tempus;
 };
 
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);

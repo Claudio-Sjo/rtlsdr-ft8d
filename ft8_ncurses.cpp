@@ -9,6 +9,8 @@
 #include <assert.h>
 #include <vector>
 #include <ctype.h>
+#include <sys/time.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
@@ -63,16 +65,16 @@ uint32_t qsoFreq;
 uint32_t reportedCQ;
 
 int init_ncurses(uint32_t initialFreq) {
-/* 
-    Initialize the working values from the main program
-*/
+    /*
+        Initialize the working values from the main program
+    */
 
-    qsoFreq = initialFreq + 1500; // Base freq + 1500Hz offset
+    qsoFreq = initialFreq + 1500;  // Base freq + 1500Hz offset
     reportedCQ = 0;
 
-/*
-    End initialization
-*/
+    /*
+        End initialization
+    */
 
     initscr();
 
@@ -133,7 +135,7 @@ int init_ncurses(uint32_t initialFreq) {
 
     mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 - QSO Mode\n");
 
-    mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), "%s",rtlsdr_ft8d_version);
+    mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), "%s", rtlsdr_ft8d_version);
 
     mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
 
@@ -340,13 +342,13 @@ void *KBDHandler(void *vargp) {
                     case ENTER:  // Activate transmission
                         switch (activeWin) {
                             case CQWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].freq , cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].freq, cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
                                 break;
                             case QSOWIN:
                                 sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].freq, qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
                                 break;
                             case TXWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d %s",qsoFreq, editString);
+                                sprintf(Txletter.ft8Message, "FT8Tx %d %s", qsoFreq, editString);
                                 break;
                             default:
                                 sprintf(Txletter.ft8Message, "FT8Tx %d SA0PRF SA0PRF JO99", qsoFreq);
@@ -481,7 +483,16 @@ void printQSO(bool refresh) {
                 } else
                     wattrset(qso, A_NORMAL);
 
-                wprintw(qso, " %dHz  %ddB %s %s\n",
+                char timeString[10];
+
+                /* convert to localtime */
+                struct tm *local = localtime(&qsoReq[i].tempus);
+
+                /* and set the string */
+                sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+
+                wprintw(qso, " %s %dHz  %ddB %s %s\n",
+                        timeString,
                         qsoReq[i].freq,
                         qsoReq[i].snr - 20,
                         qsoReq[i].src,
@@ -560,6 +571,8 @@ void printCall(bool refresh) {
 }
 
 void printLog(plain_message *logMsg) {
+    char timeString[10];
+
     wattrset(logwL, A_NORMAL);
 
     if (!strncmp(logMsg->dest, "CQ", 2))          // CQ messages are RED
@@ -568,7 +581,14 @@ void printLog(plain_message *logMsg) {
     if (!strncmp(logMsg->message, dec_options.rcall, strlen(dec_options.rcall)))
         wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
-    wprintw(logwL, "%dHz  %3ddB %s %s %s\n",
+    /* convert to localtime */
+    struct tm *local = localtime(&logMsg->tempus);
+
+    /* and set the string */
+    sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+
+    wprintw(logwL, "%s %dHz  %3ddB %s %s %s\n",
+            timeString,
             logMsg->freq,
             logMsg->snr - 20,
             logMsg->dest,
@@ -583,13 +603,16 @@ void printLog(plain_message *logMsg) {
 bool addToCQ(struct decoder_results *dr) {
     /* Is the caller already in the table? */
     for (uint32_t i = 0; i < logWLines; i++)
-        if (strcmp(dr->call, cqReq[i].call) == 0)
+        if (strcmp(dr->call, cqReq[i].call) == 0) {
+            cqReq[i].tempus = dr->tempus;
             return false;  // Found! we don't add anything
+        }
 
     cqReq[cqLast].freq = dr->freq;
     cqReq[cqLast].snr = dr->snr;
     strcpy(cqReq[cqLast].cmd, dr->cmd);
     strcpy(cqReq[cqLast].call, dr->call);
+    cqReq[cqLast].tempus = dr->tempus;
 
     cqLast = (cqLast + 1) % logWLines;
     if (cqLast == cqFirst)
@@ -607,6 +630,7 @@ bool addToQSO(struct plain_message *qsoMsg) {
     qsoReq[qsoLast].snr = qsoMsg->snr;
     strcpy(qsoReq[qsoLast].message, qsoMsg->message);
     strcpy(qsoReq[qsoLast].src, qsoMsg->src);
+    qsoReq[qsoLast].tempus = qsoMsg->tempus;
 
     qsoLast = (qsoLast + 1) % qsoWLines;
     if (qsoLast == qsoFirst)
@@ -663,9 +687,7 @@ void focusOnWin(int whatWin) {
     }
 }
 
-
-
-#define FORCEREFRESH    100 // in 10th of msec
+#define FORCEREFRESH 100  // in 10th of msec
 
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
