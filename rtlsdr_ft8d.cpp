@@ -889,6 +889,8 @@ void hashtable_add(const char* callsign, uint32_t hash)
 {
     uint16_t hash10 = (hash >> 12) & 0x3FFu;
     int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
+    int old_idx = idx_hash;
+    bool overridden = false;
     while (callsign_hashtable[idx_hash].callsign[0] != '\0')
     {
         if (((callsign_hashtable[idx_hash].hash & 0x3FFFFFu) == hash) && (0 == strcmp(callsign_hashtable[idx_hash].callsign, callsign)))
@@ -902,16 +904,17 @@ void hashtable_add(const char* callsign, uint32_t hash)
         {
             LOG(LOG_DEBUG, "Hash table clash!\n");
             // Move on to check the next entry in hash table
-            if (idx_hash + 1 > CALLSIGN_HASHTABLE_SIZE)
+            if (idx_hash + 1 == old_idx) // Wrapped all the table
                 {
                 LOG(LOG_DEBUG, "Hash table overridden!\n");
-                callsign_hashtable[0].callsign[0] = '\0';
-                callsign_hashtable[0].hash = 0;
+                callsign_hashtable[old_idx].callsign[0] = '\0';
+                callsign_hashtable[old_idx].hash = 0;
+                overridden = true;
                 }
             idx_hash = (idx_hash + 1) % CALLSIGN_HASHTABLE_SIZE;
         }
     }
-    if ((callsign_hashtable_size + 1) < CALLSIGN_HASHTABLE_SIZE)
+    if (!overridden)
         callsign_hashtable_size++;
     strncpy(callsign_hashtable[idx_hash].callsign, callsign, 11);
     callsign_hashtable[idx_hash].callsign[11] = '\0';
