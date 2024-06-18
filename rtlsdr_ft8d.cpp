@@ -1017,10 +1017,16 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 found_duplicate = true;
             } else {
-                LOG(LOG_DEBUG, "Hash table clash!\n");
+                LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
                 // wprintw(logwL, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
+                if ((idx_hash + 1) > K_MAX_MESSAGES)
+                    {
+                        LOG(LOG_DEBUG, "Decoded Hash table overridden!\n");
+                        decoded_hashtable[0] = NULL;
+                    }                    
+                }
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
             // wrefresh(logwL);
