@@ -1021,11 +1021,12 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 // wprintw(logwL, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
-                if ((idx_hash + 1) > K_MAX_MESSAGES)
+                if ((idx_hash + 1) == (message.hash % K_MAX_MESSAGES))
                     {
                         LOG(LOG_DEBUG, "Decoded Hash table overridden!\n");
-                        decoded_hashtable[0] = NULL;
-                    }            
+                        decoded_hashtable[message.hash % K_MAX_MESSAGES] = NULL;
+                    } 
+                           
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
             // wrefresh(logwL);
