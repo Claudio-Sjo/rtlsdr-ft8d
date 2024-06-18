@@ -897,16 +897,16 @@ void hashtable_add(const char* callsign, uint32_t hash)
         {
             // reset age
             callsign_hashtable[idx_hash].hash &= 0x3FFFFFu;
-            LOG(LOG_DEBUG, "Found a duplicate [%s]\n", callsign);
+            LOG(LOG_DEBUG, "ADD Found a duplicate [%s]\n", callsign);
             return;
         }
         else
         {
-            LOG(LOG_DEBUG, "Hash table clash!\n");
+            LOG(LOG_DEBUG, "ADD Hash table clash!\n");
             // Move on to check the next entry in hash table
             if (idx_hash + 1 == old_idx) // Wrapped all the table
                 {
-                LOG(LOG_DEBUG, "Hash table overridden!\n");
+                LOG(LOG_DEBUG, "ADD Hash table overridden!\n");
                 callsign_hashtable[old_idx].callsign[0] = '\0';
                 callsign_hashtable[old_idx].hash = 0;
                 overridden = true;
@@ -1010,17 +1010,17 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         bool found_duplicate = false;
         do {
             if (decoded_hashtable[idx_hash] == NULL) {
-                LOG(LOG_DEBUG, "Found an empty slot\n");
+                LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
                 // wprintw(logwL, "Found an empty slot\n");
 
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
-                LOG(LOG_DEBUG, "Found a duplicate!\n");
+                LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
                 // wprintw(logwL, "Found a duplicate!\n");
 
                 found_duplicate = true;
             } else {
-                LOG(LOG_DEBUG, "Hash table clash!\n");
+                LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
                 // wprintw(logwL, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
