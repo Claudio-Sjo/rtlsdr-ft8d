@@ -887,6 +887,11 @@ void hashtable_cleanup(uint8_t max_age)
 
 void hashtable_add(const char* callsign, uint32_t hash)
 {
+
+    // This doesn't work, let's move it out for now
+    return;
+    // End of fix
+    
     uint16_t hash10 = (hash >> 12) & 0x3FFu;
     int idx_hash = (hash10 * 23) % CALLSIGN_HASHTABLE_SIZE;
     int old_idx = idx_hash;
@@ -1024,12 +1029,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 // wprintw(logwL, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
-                if ((idx_hash + 1) == (message.hash % K_MAX_MESSAGES))
-                    {
-                        LOG(LOG_DEBUG, "Decoded Hash table overridden!\n");
-                        decoded_hashtable[message.hash % K_MAX_MESSAGES] = NULL;
-                    } 
-                           
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
             // wrefresh(logwL);
