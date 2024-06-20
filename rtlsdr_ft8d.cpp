@@ -935,6 +935,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         bool found_empty_slot = false;
         bool found_duplicate = false;
         do {
+            if (rx_state.exit_flag)
+                break; /* Abort case, final sig */
+
             if (decoded_hashtable[idx_hash] == NULL) {
                 LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
                 // wprintw(logwL, "Found an empty slot\n");
