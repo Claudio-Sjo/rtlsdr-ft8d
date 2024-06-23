@@ -997,6 +997,18 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             // wrefresh(logwL);
 
             char *strPtr = strtok((char *)text, " ");
+            // Here if the message is mlformed strtok will return NULL, this needs to be handled
+
+            if (NULL == strPtr)
+            {
+                text[FTX_MAX_MESSAGE_LENGTH] = '\0';
+                int msgLen = strlen((char *)text);
+                if (msgLen > 0)
+                    LOG(LOG_DEBUG, "Decoded : message syntax wrong : [%s]\n",text);
+
+                // Skip this message    
+                continue;
+            }
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
@@ -1026,7 +1038,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 pthread_mutex_unlock(&msglock);
 
                 num_decoded++;
-            } else {
+            } 
+            else 
+            {
                 if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
                     struct plain_message qsoMsg;
 
@@ -1325,7 +1339,7 @@ int main(int argc, char **argv) {
     signal(SIGTERM, &sigint_callback_handler);
     signal(SIGILL, &sigint_callback_handler);
     signal(SIGFPE, &sigint_callback_handler);
-    signal(SIGSEGV, &sigint_callback_handler);
+    // signal(SIGSEGV, &sigint_callback_handler);   /* SIGSEV cannot be ignored */
     signal(SIGABRT, &sigint_callback_handler);
 
     /* Init & parameter the device */
