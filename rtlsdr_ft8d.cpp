@@ -92,8 +92,8 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.4.1";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.4.1";
+const char *rtlsdr_ft8d_version = "0.4.2";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.4.2";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -987,7 +987,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            char text[FTX_MAX_MESSAGE_LENGTH];
+            char text[FTX_MAX_MESSAGE_LENGTH+1];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
 
             snprintf(msgToPrint, FTX_MAX_MESSAGE_LENGTH, "%s", text);
@@ -1001,10 +1001,12 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             if (NULL == strPtr)
             {
-                text[FTX_MAX_MESSAGE_LENGTH] = '\0';
+                text[FTX_MAX_MESSAGE_LENGTH] = (char) '\0';  // This is to be fixed
                 int msgLen = strlen((char *)text);
                 if (msgLen > 0)
                     LOG(LOG_DEBUG, "Decoded : message syntax wrong : [%s]\n",text);
+                    else
+                    LOG(LOG_DEBUG, "Decoded : message empty!\n");
 
                 // Skip this message    
                 continue;
