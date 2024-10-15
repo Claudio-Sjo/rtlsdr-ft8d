@@ -1004,9 +1004,13 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 text[FTX_MAX_MESSAGE_LENGTH] = (char) '\0';  // This is to be fixed
                 int msgLen = strlen((char *)text);
                 if (msgLen > 0)
+                {
                     LOG(LOG_DEBUG, "Decoded : message syntax wrong : [%s]\n",text);
+                }
                     else
+                    {
                     LOG(LOG_DEBUG, "Decoded : message empty!\n");
+                    }
 
                 // Skip this message    
                 continue;
