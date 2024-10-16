@@ -20,14 +20,26 @@ echo "== Install dependencies"
 sudo apt-get update && sudo apt-get -y install build-essential clang cmake libfftw3-dev libusb-1.0-0-dev libcurl4-gnutls-dev ntp git
 
 echo "== Install rtl-sdr library (on RPi, don't use your distro package)"
-git clone https://github.com/steve-m/librtlsdr
-cd librtlsdr
-mkdir -p make
-cd make
-cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DDETACH_KERNEL_DRIVER=ON -Wno-dev ..
+git clone https://github.com/rtlsdrblog/rtl-sdr-blog
+cd rtl-sdr-blog/
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DDETACH_KERNEL_DRIVER=ON -Wno-dev ../ -DINSTALL_UDEV_RULES=ON
 make
 sudo make install
+sudo cp ../rtl-sdr.rules /etc/udev/rules.d/
+sudo ldconfig
+echo 'blacklist dvb_usb_rtl28xxu' | sudo tee --append /etc/modprobe.d/blacklist-dvb_usb_rtl28xxu.conf
 cd ../..
+
+#git clone https://github.com/steve-m/librtlsdr
+#cd librtlsdr
+#mkdir -p make
+#cd make
+#cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DDETACH_KERNEL_DRIVER=ON -Wno-dev ..
+#make
+#sudo make install
+#cd ../..
 
 echo "== Install rtlsdr-ft8d"
 git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
