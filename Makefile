@@ -6,7 +6,7 @@ LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 
 ifeq ($(findstring armv6,$(shell uname -m)),armv6)
 # Broadcom BCM2835 SoC with 700 MHz 32-bit ARM 1176JZF-S (ARMv6 arch)
-PI_VERSION = -DRPI1
+PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
 else
 # Broadcom BCM2836 SoC with 900 MHz 32-bit quad-core ARM Cortex-A7  (ARMv7 arch)
 # Broadcom BCM2837 SoC with 1.2 GHz 64-bit quad-core ARM Cortex-A53 (ARMv8 arch)
