@@ -82,7 +82,6 @@ vector<struct decoder_results> dec_results_queue;
 vector<struct decoder_results> cq_queue;
 vector<struct plain_message> qso_queue;
 vector<struct plain_message> log_queue;
-int dec_results_queue_index = 0;
 
 /* mutex for thread sync */
 pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;
@@ -421,7 +420,7 @@ void postSpots(uint32_t n_results) {
 
     pthread_mutex_lock(&lock);
 
-    for (uint32_t i = 0; i < n_results && dec_results_queue_index < 2048; i++) {
+    for (uint32_t i = 0; i < n_results; i++) {
         struct decoder_results dr;
 
         // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
