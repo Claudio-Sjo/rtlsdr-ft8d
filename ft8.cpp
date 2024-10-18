@@ -635,6 +635,8 @@ void txon(bool LedON) {
         CLRBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 25);
         SETBIT_BUS_ADDR(GPIO_BUS_BASE + 4, 24);
         SETBIT_BUS_ADDR(GPIO_BUS_BASE + 0x1c, 18);
+        // We have a relay and need to consider the operate time and bounce
+        usleep(10000); // 10msec. delay
     }
 }
 
