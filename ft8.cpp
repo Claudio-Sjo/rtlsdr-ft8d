@@ -1009,7 +1009,8 @@ void wait_every_15_sec() {
             break;
         usleep(1000);
     }
-    usleep(1000000);  // wait another second
+    // usleep(1000000);  // wait another second 
+    usleep(500000);  // wait another 1/2 second 
 }
 
 void print_usage() {
