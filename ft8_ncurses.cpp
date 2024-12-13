@@ -473,6 +473,9 @@ void printQSO(bool refresh) {
         return;
 
     if (qsoFirst != qsoLast) {
+        wmove(qso, 0, 0);
+        wrefresh(qso);
+
         if (qsoLast > qsoFirst) {
             for (int i = qsoFirst; i < qsoLast; i++) {
                 if (i == qsoIdx) {
@@ -624,8 +627,14 @@ bool addToCQ(struct decoder_results *dr) {
 bool addToQSO(struct plain_message *qsoMsg) {
     for (uint32_t i = 0; i < qsoWLines; i++)
         if (strcmp(qsoMsg->src, qsoReq[i].src) == 0)
-            return false;  // Found! we don't add anything
+        {
+            // Found! we should add the message actually!!
+            strncat(qsoReq[i].message, " ", sizeof(qsoReq[i].message));
+            strncat(qsoReq[i].message, qsoMsg->message, sizeof(qsoReq[i].message));
+            return false;  
+        }
 
+    // Not found! we create the entry in the table
     qsoReq[qsoLast].freq = qsoMsg->freq;
     qsoReq[qsoLast].snr = qsoMsg->snr;
     strcpy(qsoReq[qsoLast].message, qsoMsg->message);

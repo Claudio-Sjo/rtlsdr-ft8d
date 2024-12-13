@@ -980,7 +980,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         */
         /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
-            char msgToPrint[FTX_MAX_MESSAGE_LENGTH];
             char msgToLog[FTX_MAX_MESSAGE_LENGTH];
 
             memcpy(&decoded[idx_hash], &message, sizeof(message));
@@ -989,7 +988,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             char text[FTX_MAX_MESSAGE_LENGTH+1];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
 
-            snprintf(msgToPrint, FTX_MAX_MESSAGE_LENGTH, "%s", text);
             snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
 
             // wprintw(logwL, "Message to print: %s\n", msgToPrint);
@@ -1014,6 +1012,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 // Skip this message    
                 continue;
             }
+
+            // We have a real message now, strPtr points to the first non-space char
+
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
@@ -1045,15 +1046,18 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 num_decoded++;
             } 
             else 
+            // This is not a CQ, the first string is the destination
             {
-                if (!strncmp(msgToPrint, dec_options.rcall, strlen(dec_options.rcall))) {
+                // Check if this is for us, in such case this will initiate a QSO
+                if (!strncmp(strPtr, dec_options.rcall, strlen(dec_options.rcall))) {
                     struct plain_message qsoMsg;
 
                     char *dst = strPtr;
                     char *src = strtok(NULL, " ");
+                    char *msg = strtok(NULL, " \n");
                     snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
                     snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
-                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", strtok(NULL, " \n"));
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg);
 
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
@@ -1063,6 +1067,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                 }
             }
+            // In any case we will log the message
             struct plain_message logMsg;
 
             strPtr = strtok(msgToLog, " ");
