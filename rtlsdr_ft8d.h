@@ -47,6 +47,13 @@
 #define NUM_BLOCKS (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE)  // 92 vs 92.25 DCHECK
 #define MAG_ARRAY (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)                                // 94208 vs 94464 DCHECK
 
+/* 
+ * - Timing for FT8
+ */
+#define FT8_PERIOD      15          // 15 seconds
+#define FT8_TXTIME      12600000    // 12.6 seconds in microseconds
+#define FT8_BUFRESET    15000000    // 15 seconds in microseconds
+
 /* Possible PATIENCE options for FFTW:
  * - FFTW_ESTIMATE
  * - FFTW_ESTIMATE_PATIENT

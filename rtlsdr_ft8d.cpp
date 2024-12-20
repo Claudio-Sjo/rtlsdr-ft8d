@@ -843,34 +843,24 @@ int32_t decoderSelfTest() {
     }
 }
 
-
-void hashtable_init(void)
-{
-
+void hashtable_init(void) {
 }
 
-void hashtable_cleanup(uint8_t max_age)
-{
-
+void hashtable_cleanup(uint8_t max_age) {
 }
 
-void hashtable_add(const char* callsign, uint32_t hash)
-{
+void hashtable_add(const char *callsign, uint32_t hash) {
     // This doesn't work, let's move it out for now
     return;
 }
 
-bool hashtable_lookup(ftx_callsign_hash_type_t hash_type, uint32_t hash, char* callsign)
-{
+bool hashtable_lookup(ftx_callsign_hash_type_t hash_type, uint32_t hash, char *callsign) {
     return false;
 }
 
-
 ftx_callsign_hash_interface_t hash_if = {
     .lookup_hash = hashtable_lookup,
-    .save_hash = hashtable_add
-};
-
+    .save_hash = hashtable_add};
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
     const ftx_waterfall_t *wf = &mon->wf;
@@ -985,7 +975,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            char text[FTX_MAX_MESSAGE_LENGTH+1];
+            char text[FTX_MAX_MESSAGE_LENGTH + 1];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
 
             snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
@@ -996,20 +986,16 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             char *strPtr = strtok((char *)text, " ");
             // Here if the message is mlformed strtok will return NULL, this needs to be handled
 
-            if (NULL == strPtr)
-            {
-                text[FTX_MAX_MESSAGE_LENGTH] = (char) '\0';  // This is to be fixed
+            if (NULL == strPtr) {
+                text[FTX_MAX_MESSAGE_LENGTH] = (char)'\0';  // This is to be fixed
                 int msgLen = strlen((char *)text);
-                if (msgLen > 0)
-                {
-                    LOG(LOG_DEBUG, "Decoded : message syntax wrong : [%s]\n",text);
-                }
-                    else
-                    {
+                if (msgLen > 0) {
+                    LOG(LOG_DEBUG, "Decoded : message syntax wrong : [%s]\n", text);
+                } else {
                     LOG(LOG_DEBUG, "Decoded : message empty!\n");
-                    }
+                }
 
-                // Skip this message    
+                // Skip this message
                 continue;
             }
 
@@ -1044,8 +1030,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 pthread_mutex_unlock(&msglock);
 
                 num_decoded++;
-            } 
-            else 
+            } else
             // This is not a CQ, the first string is the destination
             {
                 // Check if this is for us, in such case this will initiate a QSO
@@ -1456,14 +1441,14 @@ int main(int argc, char **argv) {
     else
         wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
-
     hashtable_init();
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);
-    uint32_t sec = lTime.tv_sec % 15;
+    uint32_t sec = lTime.tv_sec % FT8_PERIOD;
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
-    uint32_t uwait = 15000000 - usec;
+    uint32_t uwait = FT8_BUFRESET - usec;
+    uint32_t ft8wait;
     wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
     wrefresh(logwL);
 
@@ -1495,20 +1480,47 @@ int main(int argc, char **argv) {
     pthread_create(&spottingThread, NULL, TXHandler, NULL);
 
     /* Main loop : Wait, read, decode */
+    /* TODO */
+    /*  - Decoder thread must be started at second 12.6 whilst buffer has to be reset at sec 15
+        - Buffer also can be shorter, thus we may reset the bufferIndex twice
+    */
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
         /* Wait for time Sync on 15 secs */
         gettimeofday(&lTime, NULL);
-        sec = lTime.tv_sec % 15;
+        sec = lTime.tv_sec % FT8_PERIOD;
         usec = sec * 1000000 + lTime.tv_usec;
-        uwait = 15000000 - usec;
-        LOG(LOG_DEBUG, "Main thread -- Waiting %d seconds\n", uwait / 1000000);
-        usleep(uwait);
-        LOG(LOG_DEBUG, "Main thread -- Sending a GO to the decoder thread\n");
+        ft8wait = FT8_TXTIME - usec;  // Time before decoding
+        uwait = FT8_BUFRESET - usec;  // Time before buffer reset
+        if (uwait > ft8wait)          // Normal case, we wait for FT8_TXTIME
+        {
+            usleep(ft8wait);  // Sync with peer transmission
+            /* Switch to the other buffer and trigger the decoder */
+            rx_state.bufferIndex = (rx_state.bufferIndex + 1) % 2;
+            rx_state.iqIndex[rx_state.bufferIndex] = 0;
+            safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
+
+            // Sync with the FT8_PERIOD and reset the buffer index
+            gettimeofday(&lTime, NULL);
+            sec = lTime.tv_sec % FT8_PERIOD;
+            usec = sec * 1000000 + lTime.tv_usec;
+            uwait = FT8_BUFRESET - usec;  // Time before buffer reset
+            usleep(uwait);
+            rx_state.iqIndex[rx_state.bufferIndex] = 0;
+        }
+        else // There's some problem, don't decode and just fix the index
+        {
+            rx_state.iqIndex[rx_state.bufferIndex] = 0;
+        }
+
+        // LOG(LOG_DEBUG, "Main thread -- Waiting %d seconds\n", uwait / 1000000);
+        // usleep(uwait);
+        // LOG(LOG_DEBUG, "Main thread -- Sending a GO to the decoder thread\n");
 
         /* Switch to the other buffer and trigger the decoder */
-        rx_state.bufferIndex = (rx_state.bufferIndex + 1) % 2;
-        rx_state.iqIndex[rx_state.bufferIndex] = 0;
-        safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
+        // rx_state.bufferIndex = (rx_state.bufferIndex + 1) % 2;
+        // rx_state.iqIndex[rx_state.bufferIndex] = 0;
+        // safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
+
         usleep(100000); /* Give a chance to the other thread to update the nloop counter */
     }
 
