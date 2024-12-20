@@ -47,12 +47,12 @@
 #define NUM_BLOCKS (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE)  // 92 vs 92.25 DCHECK
 #define MAG_ARRAY (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)                                // 94208 vs 94464 DCHECK
 
-/* 
+/*
  * - Timing for FT8
  */
-#define FT8_PERIOD      15          // 15 seconds
-#define FT8_TXTIME      12600000    // 12.6 seconds in microseconds
-#define FT8_BUFRESET    15000000    // 15 seconds in microseconds
+#define FT8_PERIOD 15          // 15 seconds
+#define FT8_TXTIME 12600000    // 12.6 seconds in microseconds
+#define FT8_BUFRESET 15000000  // 15 seconds in microseconds
 
 /* Possible PATIENCE options for FFTW:
  * - FFTW_ESTIMATE
@@ -80,6 +80,10 @@
     pthread_mutex_lock(m);   \
     pthread_cond_wait(n, m); \
     pthread_mutex_unlock(m)
+
+/* type for odd/even slot*/
+typedef enum ft8slot_t { even,
+                         odd };
 
 /* Thread for decoding */
 struct decoder_thread {
@@ -152,6 +156,7 @@ struct plain_message {
     int32_t freq;
     int32_t snr;
     time_t tempus;
+    ft8slot_t ft8slot;
 };
 
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);
