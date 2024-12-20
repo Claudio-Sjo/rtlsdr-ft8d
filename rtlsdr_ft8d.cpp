@@ -1506,9 +1506,9 @@ int main(int argc, char **argv) {
             uwait = FT8_BUFRESET - usec;  // Time before buffer reset
             usleep(uwait);
             rx_state.iqIndex[rx_state.bufferIndex] = 0;
-        }
-        else // There's some problem, don't decode and just fix the index
+        } else  // There's some problem, don't decode and just fix the index
         {
+            usleep(uwait);
             rx_state.iqIndex[rx_state.bufferIndex] = 0;
         }
 
