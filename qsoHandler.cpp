@@ -42,7 +42,7 @@
 
 #define MAXQSOLIFETIME 12  // in quarter of a minute
 
-typedef enum qsostate_t = {idle, replyLoc, replySig, replyRR73, reply73};
+typedef enum qsostate_t = {idle, replyLoc, replySig, replyRR73, reply73, cqIng};
 char qsoLogFileName[] = "QSOLOG.txt";
 
 /* Variables */
@@ -134,7 +134,7 @@ void queueTx(char *the String) {
 }
 
 bool handleTx(ft8slot_t theSlot) {
-    if (qsoState == idle)
+    if ((qsoState == idle) || (qsoState == cqIng))
         return false;
     else {
         if (txBusy == false) {
@@ -175,18 +175,28 @@ bool handleTx(ft8slot_t theSlot) {
     }
 }
 
+bool queryCQ() {
+    char theMessage[255];
+
+    sprintf(theMessage, "FT8Tx %d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
+    queueTx(theMessage);
+}
+
 /* 
-This function is to be called at every slot 
+This function is to be called at every slot
+after scanning of ft8 messages. 
+queryCq() must be called AFTER this function
 In case the Tx is idle, it returns true,
-otherwise it returns false AND the peer
+otherwise it returns false.
 */
-bool isQsoIdle(ft8slot_t theSlot, char *dst) {
+bool updateQsoMachine(ft8slot_t theSlot) {
     ft8tick++;
 
     /* Complete the Tx session */
-    txBusy = false;
-
     txBusy = handleTx(theSlot);
+
+    if (qsoState == cqIng)
+        qsoState = idle;
 
     if (qsoState == idle) return true;
 
@@ -194,12 +204,12 @@ bool isQsoIdle(ft8slot_t theSlot, char *dst) {
     if (ft8tick >= ft8time) {
         /* Check if the QSO can be considered closed, if so log the record */
         if ((qsoState != replyLoc) && (qsoState != replySig)) {
-            /* This QSO shall be loggeg */
+            /* This QSO shall be logged */
+            /* TBD */
         }
         resetQsoState();
         return true;
     }
-    sprintf(dst, "%s", theQso.src);
     return false;
 }
 
@@ -232,8 +242,8 @@ bool updateQso(struct plain_message *newQso) {
 
     // Check for all the cases
     if ((strstr(theQso.message, "+")) || (strstr(theQso.message, "-"))) {
-        if (qsoState == )
-        qsoState = replyRR73;
+        if (qsoState ==)
+            qsoState = replyRR73;
     }
     if (strlen(theQso.message) > 3)  // This is a Locator
         qsoState = replySig;
