@@ -38,6 +38,8 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
+#define DEBUG
+
 #define MAXQSOPEERS 512  // size of the Peer's database
 
 #define MAXQSOLIFETIME 12  // in quarter of a minute
@@ -48,11 +50,19 @@ typedef enum qsostate_t { idle,
                           replyRR73,
                           reply73,
                           cqIng };
+
+typedef enum peermsg_t { cqMsg,
+                         locMsg,
+                         sigMsg,
+                         RR73Msg,
+                         s73Msg,
+};
+
 char qsoLogFileName[] = "QSOLOG.txt";
 
 /* Variables */
 static qsostate_t qsoState = idle;
-static struct plain_message theQso;
+static struct plain_message currentQSO;
 static uint32_t ft8time = 0;
 static uint32_t ft8tick = 0;
 static bool txBusy;
@@ -63,25 +73,25 @@ void initQsoState(void) {
     qsoState = idle;
     ft8time = 0;
     ft8tick = 0;
-    theQso.src[0] = 0;   // This is the Peer for the QSO
-    theQso.dest[0] = 0;  // This is the local callId
-    theQso.message[0] = 0;
-    theQso.freq = 0;
-    theQso.snr = 0;
-    theQso.tempus = 0;
-    theQso.ft8slot = odd;
+    currentQSO.src[0] = 0;   // This is the Peer for the QSO
+    currentQSO.dest[0] = 0;  // This is the local callId
+    currentQSO.message[0] = 0;
+    currentQSO.freq = 0;
+    currentQSO.snr = 0;
+    currentQSO.tempus = 0;
+    currentQSO.ft8slot = odd;
     txBusy = false;
 }
 
 static void resetQsoState(void) {
     qsoState = idle;
-    theQso.src[0] = 0;
-    theQso.dest[0] = 0;
-    theQso.message[0] = 0;
-    theQso.freq = 0;
-    theQso.snr = 0;
-    theQso.tempus = 0;
-    theQso.ft8slot = odd;
+    currentQSO.src[0] = 0;
+    currentQSO.dest[0] = 0;
+    currentQSO.message[0] = 0;
+    currentQSO.freq = 0;
+    currentQSO.snr = 0;
+    currentQSO.tempus = 0;
+    currentQSO.ft8slot = odd;
     ft8time = ft8tick;
 }
 
@@ -89,16 +99,13 @@ uint32_t hashCallId(char *theCall) {
     uint32_t theValue = 0;
 
     uint32_t theLength = strlen(theCall);
-    if(theLength > 6) theLength = 6;
+    if (theLength > 6) theLength = 6;
 
     for (uint32_t i = 0; i < theLength; i++) {
         theValue *= 36;
-        if (theCall[i] >= 'A')
-        {
+        if (theCall[i] >= 'A') {
             theValue += theCall[i] - 'A' + 10;
-        }
-        else
-        {
+        } else {
             theValue += theCall[i] - '0';
         }
     }
@@ -142,29 +149,29 @@ bool handleTx(ft8slot_t theSlot) {
     else {
         if (txBusy == false) {
             /* If we are in the same slot than the QSO, we will queue the reply */
-            if (theQso.ft8slot == the Slot) {
+            if (currentQSO.ft8slot == the Slot) {
                 char theMessage[255];
                 char theLevel[255];
                 switch (qsoState) {
                     case replyLoc:
                         // Reply FT8Tx FREQ DEST SRC LOC
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", theQso.freq, theQso.dest, theQso.src, dec_options.rloc);
+                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.dest, currentQSO.src, dec_options.rloc);
                         break;
                     case replySig:
                         // Reply FT8Tx FREQ DEST SRC LEVEL
-                        if (theQso.snr >= 0)
-                            sprintf(theLevel, "+%02d", theQso.snr);
+                        if (currentQSO.snr >= 0)
+                            sprintf(theLevel, "+%02d", currentQSO.snr);
                         else
-                            sprintf(theLevel, "-%02d", theQso.snr);
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", theQso.freq, theQso.dest, theQso.src, theLevel);
+                            sprintf(theLevel, "-%02d", currentQSO.snr);
+                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.dest, currentQSO.src, theLevel);
                         break;
                     case replyRR73:
-                        sprintf(theMessage, "FT8Tx %d %s %s RR73", theQso.freq, theQso.dest, theQso.src);
+                        sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.dest, currentQSO.src);
                         // Reply DEST SRC RR73
                         break;
                     case reply73:
                         // Reply DEST SRC 73
-                        sprintf(theMessage, "FT8Tx %d %s %s 73", theQso.freq, theQso.dest, theQso.src);
+                        sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.dest, currentQSO.src);
                         qsoState = idle;
                         break;
                 }
@@ -263,59 +270,109 @@ Tmo   |  Any       | Idle       | Close
 ------+------------+------------+---------
 
 */
+peermsg_t parseMsg(char *msg) {
+    char *ptr = msg;
 
-bool addQso(struct plain_message *newQso) {
-    /* If we had already a QSO with that peer we reject the QSO */
-    if (checkPeer(newQso->src))
-        return false;
+    if (isdigit(*ptr)) {
+        if (atoi(msg) == 73)
+            return s73Msg;
+        else
+            return sigMsg;
+    }
 
-    ft8time = ft8tick + MAXQSOLIFETIME;
-    sprintf(theQso.src, "%s", newQso->src);    // This is the Peer for the QSO
-    sprintf(theQso.dest, "%s", newQso->dest);  // This is the local callId
-    sprintf(theQso.message, "%s", newQso->message);
-    theQso.freq = newQso->freq;
-    theQso.snr = newQso->snr;
-    /// theQso.tempus = newQso->tempus;
-    theQso.ft8slot = newQso->ft8slot;
+    /* Let's check if this is a number */
+    if ((*ptr == '+') || (*ptr == '-')) {
+        return sigMsg;
+    }
 
-    if (strlen(theQso.message) > 3)  // This is a Locator
-        qsoState = replySig;
-    else
-        qsoState = replyLoc;  // This is a CQ
+    if (strlen(msg) == 4) {
+        if ((msg[0] == 'R') && (msg[1] == 'R'))
+            return RR73Msg;
+        else
+            return locMsg;
+    }
 
-    txBusy = handleTx(theQso.ft8slot);
+    return locMsg;
 }
 
-bool updateQso(struct plain_message *newQso) {
-    /* It's valid only if we had already a QSO with that peer */
-    if (checkPeer(newQso->src) == false)
-        return false;
+bool addQso(struct plain_message *newQso) {
+    /* We accept new QSO if we are Idle */
+    if (qsoState == idle) {
+        /* If we had already a QSO with that peer we reject the QSO */
+        if (checkPeer(newQso->src))
+            return false;
 
-    // Check for all the cases
-    if ((strstr(theQso.message, "+")) || (strstr(theQso.message, "-"))) {
-        if (qsoState ==)
-            qsoState = replyRR73;
+        ft8time = ft8tick + MAXQSOLIFETIME;
+        sprintf(currentQSO.src, "%s", newQso->src);    // This is the Peer for the QSO
+        sprintf(currentQSO.dest, "%s", newQso->dest);  // This is the local callId
+        sprintf(currentQSO.message, "%s", newQso->message);
+        currentQSO.freq = newQso->freq;
+        currentQSO.snr = newQso->snr;
+        /// currentQSO.tempus = newQso->tempus;
+        currentQSO.ft8slot = newQso->ft8slot;
+
+        /* We can only add a QSO when in Idle state */
+
+        switch (parseMsg(currentQSO.message)) {
+            case locMsg:
+            case sigMsg:
+                qsoState = replySig;
+                break;
+            case RR73Msg:
+                qsoState = reply73;
+                break;
+            case s73Msg:
+                break;
+        }
+        if (qsoState != idle)
+            return true;
+    } else {
+        /* This may be a spurious request or an update to the current QSO */
+
+        if (hashCallId(newQso->src) != (hashCallId(currentQSO.src)))
+            return false;
+
+        /* Here we are in the case of updating the QSO */
+        switch (parseMsg(currentQSO.message)) {
+            case locMsg:
+                qsoState = replySig;
+                break;
+            case sigMsg:
+                if (qsoState == replyLoc)
+                    qsoState = replySig;
+                else
+                    qsoState = replyRR73;
+                break;
+            case RR73Msg:
+                qsoState = reply73;
+                break;
+            case s73Msg: qsoState = idle;
+                break;
+        }
+        if (qsoState != idle)
+            return true;
     }
-    if (strlen(theQso.message) > 3)  // This is a Locator
-        qsoState = replySig;
-    else
-        qsoState = replyLoc;  // This is a CQ
 }
 
 /* Thi function is called when autometic CQ answer is enabled */
 bool addCQ(struct plain_message *newQso) {
+    if (qsoState != idle)
+        return false;
+
     /* If we had already a QSO with that peer we reject the QSO */
     if (checkPeer(newQso->src))
         return false;
 
     ft8time = ft8tick + MAXQSOLIFETIME;
-    sprintf(theQso.src, "%s", newQso->src);  // This is the Peer for the QSO
-    sprintf(theQso.dest, "\n");
-    sprintf(theQso.message, "CQ");
-    theQso.freq = newQso->freq;
-    theQso.snr = newQso->snr;
-    theQso.tempus = newQso->tempus;
-    theQso.ft8slot = newQso->ft8slot;
+    sprintf(currentQSO.src, "%s", newQso->src);  // This is the Peer for the QSO
+    sprintf(currentQSO.dest, "\n");
+    sprintf(currentQSO.message, "CQ");
+    currentQSO.freq = newQso->freq;
+    currentQSO.snr = newQso->snr;
+    currentQSO.tempus = newQso->tempus;
+    currentQSO.ft8slot = newQso->ft8slot;
 
     qsoState = replyLoc;  // This is a CQ
+
+    return true;
 }
