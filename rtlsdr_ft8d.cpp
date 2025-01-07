@@ -863,11 +863,10 @@ ftx_callsign_hash_interface_t hash_if = {
     .save_hash = hashtable_add};
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
-
     /* Get the slot type */
     struct timeval lTime;
     gettimeofday(&lTime, NULL);
-    
+
     ft8slot_t thisSlot = ((lTime.tv_sec / FT8_PERIOD) & 0x01) ? odd : even;
 
     const ftx_waterfall_t *wf = &mon->wf;
@@ -1010,6 +1009,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
+                struct plain_message qsoMsg;
+
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
 
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
@@ -1036,6 +1037,11 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 pthread_mutex_unlock(&msglock);
 
+                snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
+                qsoMsg.freq = (int32_t)freq_hz + 1500;
+                qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
+                qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
                 num_decoded++;
             } else
             // This is not a CQ, the first string is the destination
@@ -1054,7 +1060,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
-                    qsoMsg.ft8slot = thisSlot;      // This is useful only in QSO mode
+                    qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
 
                     pthread_mutex_lock(&QSOlock);  // Protect decodes structure
                     qso_queue.push_back(qsoMsg);
