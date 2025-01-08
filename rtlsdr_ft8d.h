@@ -82,8 +82,8 @@
     pthread_mutex_unlock(m)
 
 /* type for odd/even slot*/
-typedef enum ft8slot_t { even,
-                         odd };
+typedef enum _ft8slot_t { even,
+                         odd } ft8slot_t;
 
 /* Thread for decoding */
 struct decoder_thread {

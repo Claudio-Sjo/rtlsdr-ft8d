@@ -46,7 +46,7 @@
 #define MAXQSOPEERS 512  // size of the Peer's database
 
 #define MAXQSOLIFETIME 12  // in quarter of a minute
-#define QUERYCQDELAY    3   // in quarter of a minute
+#define QUERYCQDELAY 3     // in quarter of a minute
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -62,19 +62,18 @@ extern struct receiver_options rx_options;
 extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
-typedef enum qsostate_t { idle,
-                          replyLoc,
-                          replySig,
-                          replyRR73,
-                          reply73,
-                          cqIng };
+typedef enum _qsostate_t { idle,
+                           replyLoc,
+                           replySig,
+                           replyRR73,
+                           reply73,
+                           cqIng } qsostate_t;
 
-typedef enum peermsg_t { cqMsg,
-                         locMsg,
-                         sigMsg,
-                         RR73Msg,
-                         s73Msg,
-};
+typedef enum _peermsg_t { cqMsg,
+                          locMsg,
+                          sigMsg,
+                          RR73Msg,
+                          s73Msg } peermsg_t;
 
 char qsoLogFileName[] = "QSOLOG.txt";
 
@@ -191,6 +190,9 @@ bool handleTx(ft8slot_t txSlot) {
                         // Reply DEST SRC 73
                         sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.dest, currentQSO.src);
                         qsoState = idle;
+                        break;
+                    default:
+                        qsoState = idle;  // It should NEVER happen
                         break;
                 }
                 LOG(LOG_DEBUG, "%sn", theMessage);
@@ -347,6 +349,8 @@ bool addQso(struct plain_message *newQso) {
                 break;
             case s73Msg:
                 break;
+            default:  // This should NEVER happen
+                break;
         }
         if (qsoState != idle)
             return true;
@@ -373,10 +377,14 @@ bool addQso(struct plain_message *newQso) {
             case s73Msg:
                 qsoState = idle;
                 break;
+            default:
+                qsoState = idle;  // This should NEVER happen
+                break;
         }
         if (qsoState != idle)
             return true;
     }
+    return false;
 }
 
 /* Thi function is called when autometic CQ answer is enabled */
