@@ -84,6 +84,10 @@ int init_ncurses(uint32_t initialFreq) {
     /* No echo when getting chars */
     noecho();
 
+    /* We need the time of the day */
+    time_t currentTime = time(NULL);
+    struct tm tm = *localtime(&currentTime);
+
     /* create subwindow on stdscr */
 
     header = subwin(stdscr, 1, COLS - 2, 1, 1);
@@ -133,9 +137,9 @@ int init_ncurses(uint32_t initialFreq) {
     /* Print the header */
     mvwprintw(header, 0, 1, "%s - %s  %dHz\n", dec_options.rcall, dec_options.rloc, qsoFreq);
 
-    mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 - QSO Mode\n");
+    mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 %s - QSO Mode\n", rtlsdr_ft8d_version);
 
-    mvwprintw(header, 0, COLS - (strlen(rtlsdr_ft8d_version) + 6), "%s", rtlsdr_ft8d_version);
+    //   mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
 
@@ -426,15 +430,19 @@ void printCQ(bool refresh) {
 
         wprintw(logwR, "    Incoming CQ Requests\n");
 
+        wattrset(logwR, A_NORMAL);
+
         if (cqLast > cqFirst) {
             for (int i = cqFirst; i < cqLast; i++) {
-                if (i == cqIdx) {
-                    if (activeWin == CQWIN)
-                        wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
-                    else
-                        wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
-                } else
-                    wattrset(logwR, A_NORMAL);
+                /*
+            if (i == cqIdx) {
+
+                if (activeWin == CQWIN)
+                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                else
+                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+            } else
+                                */
 
                 wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
                         cqReq[i].cmd,
@@ -445,14 +453,15 @@ void printCQ(bool refresh) {
         } else {
             int idx = cqFirst;
             for (int i = 0; i < logWLines; i++) {
+                /*
                 if (i == cqIdx) {
-                    if (activeWin == CQWIN)
-                        wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
-                    else
-                        wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+                if (activeWin == CQWIN)
+                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                else
+                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
                 } else
-                    wattrset(logwR, A_NORMAL);
-
+                wattrset(logwR, A_NORMAL);
+                */
                 wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
                         cqReq[(i + cqFirst) % logWLines].cmd,
                         cqReq[(i + cqFirst) % logWLines].call,
@@ -475,9 +484,11 @@ void printQSO(bool refresh) {
     if (qsoFirst != qsoLast) {
         wmove(qso, 0, 0);
         wrefresh(qso);
+        wattrset(qso, A_NORMAL);
 
         if (qsoLast > qsoFirst) {
             for (int i = qsoFirst; i < qsoLast; i++) {
+                /*
                 if (i == qsoIdx) {
                     if (activeWin == QSOWIN)
                         wattrset(qso, COLOR_PAIR(12) | A_BOLD);
@@ -485,7 +496,7 @@ void printQSO(bool refresh) {
                         wattrset(qso, COLOR_PAIR(2) | A_BOLD);
                 } else
                     wattrset(qso, A_NORMAL);
-
+*/
                 char timeString[10];
 
                 /* convert to localtime */
@@ -504,6 +515,7 @@ void printQSO(bool refresh) {
         } else {
             int idx = qsoFirst;
             for (int i = 0; i < qsoWLines; i++) {
+                /*
                 if (i == qsoIdx) {
                     if (activeWin == QSOWIN)
                         wattrset(qso, COLOR_PAIR(12) | A_BOLD);
@@ -511,7 +523,7 @@ void printQSO(bool refresh) {
                         wattrset(qso, COLOR_PAIR(2) | A_BOLD);
                 } else
                     wattrset(qso, A_NORMAL);
-
+*/
                 wprintw(qso, " %dHz  %ddB %s %s\n",
                         qsoReq[i].freq,
                         qsoReq[i].snr - 20,
@@ -526,17 +538,27 @@ void printQSO(bool refresh) {
     }
 }
 
+/* Update the Clock */
+void printClock(void) {
+    /* We need the time of the day */
+    time_t currentTime = time(NULL);
+    struct tm tm = *localtime(&currentTime);
+
+    mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
 // Print on the Call window
 void printCall(bool refresh) {
     if (!refresh)
         return;
 
-    if (activeWin == CQWIN)
-        sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
-    if (activeWin == QSOWIN)
-        sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
-    if (activeWin == TXWIN)
-        sprintf(txString, "");
+    /*
+        if (activeWin == CQWIN)
+            sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+        if (activeWin == QSOWIN)
+            sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
+        if (activeWin == TXWIN)
+            sprintf(txString, "");
+    */
 
     wmove(call, 0, 0);  // Y,X
     werase(call);
@@ -626,12 +648,11 @@ bool addToCQ(struct decoder_results *dr) {
 
 bool addToQSO(struct plain_message *qsoMsg) {
     for (uint32_t i = 0; i < qsoWLines; i++)
-        if (strcmp(qsoMsg->src, qsoReq[i].src) == 0)
-        {
+        if (strcmp(qsoMsg->src, qsoReq[i].src) == 0) {
             // Found! we should add the message actually!!
             strncat(qsoReq[i].message, " ", sizeof(qsoReq[i].message));
             strncat(qsoReq[i].message, qsoMsg->message, sizeof(qsoReq[i].message));
-            return false;  
+            return false;
         }
 
     // Not found! we create the entry in the table
@@ -702,6 +723,7 @@ void focusOnWin(int whatWin) {
 void *CQHandler(void *vargp) {
     static bool termRefresh = false;
     int dynamicRefresh = 0;
+    uint32_t clockRefresh = 60;
 
     while (true) {
         char key;
@@ -731,9 +753,10 @@ void *CQHandler(void *vargp) {
             kbd_queue.erase(kbd_queue.begin());
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
 
-            if (key == TAB)
-                focusOnWin(activeWin);
-
+            /*
+                        if (key == TAB)
+                            focusOnWin(activeWin);
+            */
             termRefresh = true;
         }
         if (qso_queue.size()) {
@@ -760,7 +783,17 @@ void *CQHandler(void *vargp) {
         printCall(termRefresh);
         if (termRefresh)
             refresh();
+        if (clockRefresh-- == 0) {
+            printClock();
+            clockRefresh = 20;
+            refresh();
+        }
         termRefresh = false;
+
         usleep(10000); /* Wait 10 msec.*/
     }
+}
+
+void displayTxString(char *txMsg) {
+    sprintf(txString, "%s", txMsg);
 }

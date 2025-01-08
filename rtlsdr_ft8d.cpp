@@ -1042,7 +1042,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 if (qsoPossible == true) {
                     snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
-                    qsoMsg.freq = (int32_t)freq_hz + 1500;
+                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
@@ -1472,6 +1472,7 @@ int main(int argc, char **argv) {
         wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
 
     hashtable_init();
+    initQsoState();
 
     /* Wait for timing alignment */
     gettimeofday(&lTime, NULL);

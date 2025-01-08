@@ -21,4 +21,5 @@ void *CQHandler(void *vargp);
 void *KBDHandler(void *vargp);
 void *TXHandler(void *vargp);
 void printHeaders(void);
+void displayTxString(char *txMsg);
 

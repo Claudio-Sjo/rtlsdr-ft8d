@@ -38,10 +38,9 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
-#include "./rtlsdr_ft8d.h"
-#include "./ft8tx/FT8Types.h"
-#include "qsoHandler.h"
-
+#include <rtlsdr_ft8d.h>
+#include <ft8tx/FT8Types.h>
+#include <qsoHandler.h>
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -61,10 +60,8 @@ extern std::vector<FT8Msg> tx_queue;
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
-#define MAXQSOLIFETIME 12  // in quarter of a minute
-#define QUERYCQDELAY 3     // in quarter of a minute
-
-
+#define MAXQSOLIFETIME 4   // in quarter of a minute
+#define QUERYCQDELAY   3   // in quarter of a minute
 
 char qsoLogFileName[] = "QSOLOG.txt";
 
@@ -163,7 +160,7 @@ bool handleTx(ft8slot_t txSlot) {
                 switch (qsoState) {
                     case replyLoc:
                         // Reply FT8Tx FREQ DEST SRC LOC
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.dest, currentQSO.src, dec_options.rloc);
+                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                         break;
                     case replySig:
                         // Reply FT8Tx FREQ DEST SRC LEVEL
@@ -171,29 +168,28 @@ bool handleTx(ft8slot_t txSlot) {
                             sprintf(theLevel, "+%02d", currentQSO.snr);
                         else
                             sprintf(theLevel, "-%02d", currentQSO.snr);
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.dest, currentQSO.src, theLevel);
+                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
                         break;
                     case replyRR73:
-                        sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.dest, currentQSO.src);
+                        sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.src, dec_options.rcall);
                         // Reply DEST SRC RR73
                         break;
                     case reply73:
                         // Reply DEST SRC 73
-                        sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.dest, currentQSO.src);
+                        sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.src, dec_options.rcall);
                         qsoState = idle;
                         break;
                     default:
                         qsoState = idle;  // It should NEVER happen
                         break;
                 }
-                LOG(LOG_DEBUG, "%sn", theMessage);
+                LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
-#ifndef DEBUG
                 queueTx(theMessage);
-#endif
+                displayTxString(theMessage);
             }
         }  // Txbusy = false
-        return true;
+        return false;
     }
 }
 
@@ -203,11 +199,10 @@ bool queryCQ(void) {
 
     if (ft8tick >= queryRepeat) {
         sprintf(cqMessage, "FT8Tx %d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
-        LOG(LOG_DEBUG, "%sn", cqMessage);
+        LOG(LOG_DEBUG, "queryCq Transmitting %s\n", cqMessage);
 
-#ifndef DEBUG
         queueTx(cqMessage);
-#endif
+        displayTxString(cqMessage);
         queryRepeat = ft8tick + QUERYCQDELAY;
         return true;
     }
@@ -389,12 +384,14 @@ bool addCQ(struct plain_message *newQso) {
 
     ft8time = ft8tick + MAXQSOLIFETIME;
     sprintf(currentQSO.src, "%s", newQso->src);  // This is the Peer for the QSO
-    sprintf(currentQSO.dest, "\n");
+    sprintf(currentQSO.dest, "");
     sprintf(currentQSO.message, "CQ");
     currentQSO.freq = newQso->freq;
     currentQSO.snr = newQso->snr;
     currentQSO.tempus = newQso->tempus;
     currentQSO.ft8slot = newQso->ft8slot;
+
+    LOG(LOG_DEBUG, "addCQ From %s\n", currentQSO.src);
 
     qsoState = replyLoc;  // This is a CQ
 
