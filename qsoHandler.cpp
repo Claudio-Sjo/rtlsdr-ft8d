@@ -38,11 +38,29 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
-#define DEBUG
+#include "./rtlsdr_ft8d.h"
+#include "./ft8tx/FT8Types.h"
+
+// #define DEBUG
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
 #define MAXQSOLIFETIME 12  // in quarter of a minute
+#define QUERYCQDELAY    3   // in quarter of a minute
+
+extern const char *rtlsdr_ft8d_version;
+extern char pskreporter_app_version[];
+extern std::vector<struct decoder_results> cq_queue;
+extern std::vector<struct plain_message> qso_queue;
+extern std::vector<struct plain_message> log_queue;
+extern pthread_mutex_t CQlock;
+extern pthread_mutex_t QSOlock;
+extern pthread_mutex_t LOGlock;
+extern struct decoder_options dec_options;
+extern struct receiver_options rx_options;
+
+extern pthread_mutex_t TXlock;
+extern std::vector<FT8Msg> tx_queue;
 
 typedef enum qsostate_t { idle,
                           replyLoc,
@@ -133,23 +151,23 @@ bool addPeer(char *newPeer) {
     return true;
 }
 
-void queueTx(char *the String) {
+void queueTx(char *txString) {
     FT8Msg Txletter;
 
-    sprintf(Txletter.ft8Message, "%s", theString);
+    sprintf(Txletter.ft8Message, "%s", txString);
 
     pthread_mutex_lock(&TXlock);  // Protect key queue structure
     tx_queue.push_back(Txletter);
     pthread_mutex_unlock(&TXlock);  // Protect key queue structure
 }
 
-bool handleTx(ft8slot_t theSlot) {
+bool handleTx(ft8slot_t txSlot) {
     if ((qsoState == idle) || (qsoState == cqIng))
         return false;
     else {
         if (txBusy == false) {
             /* If we are in the same slot than the QSO, we will queue the reply */
-            if (currentQSO.ft8slot == the Slot) {
+            if (currentQSO.ft8slot == txSlot) {
                 char theMessage[255];
                 char theLevel[255];
                 switch (qsoState) {
@@ -187,14 +205,20 @@ bool handleTx(ft8slot_t theSlot) {
 }
 
 bool queryCQ() {
-    char theMessage[255];
+    char cqMessage[255];
+    static uint32_t queryRepeat = 0;
 
-    sprintf(theMessage, "FT8Tx %d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
-    LOG(LOG_DEBUG, "%sn", theMessage);
+    if (ft8tick >= queryRepeat) {
+        sprintf(cqMessage, "FT8Tx %d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
+        LOG(LOG_DEBUG, "%sn", cqMessage);
 
 #ifndef DEBUG
-    queueTx(theMessage);
+        queueTx(cqMessage);
 #endif
+        queryRepeat = ft8tick + QUERYCQDELAY;
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -329,7 +353,7 @@ bool addQso(struct plain_message *newQso) {
     } else {
         /* This may be a spurious request or an update to the current QSO */
 
-        if (hashCallId(newQso->src) != (hashCallId(currentQSO.src)))
+        if (strcmp(newQso->src, currentQSO.src) != 0)
             return false;
 
         /* Here we are in the case of updating the QSO */
@@ -346,7 +370,8 @@ bool addQso(struct plain_message *newQso) {
             case RR73Msg:
                 qsoState = reply73;
                 break;
-            case s73Msg: qsoState = idle;
+            case s73Msg:
+                qsoState = idle;
                 break;
         }
         if (qsoState != idle)
