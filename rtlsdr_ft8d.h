@@ -152,6 +152,7 @@ struct decoder_results {
 struct plain_message {
     char src[13];
     char dest[13];
+    char loc[13];
     char message[40];
     int32_t freq;
     int32_t snr;

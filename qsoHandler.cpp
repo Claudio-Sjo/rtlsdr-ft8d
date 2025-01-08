@@ -56,12 +56,13 @@ extern struct receiver_options rx_options;
 extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
-// #define DEBUG
+/* When testing define the symbol TESTQSO */
+#define TESTQSO
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
-#define MAXQSOLIFETIME 4   // in quarter of a minute
-#define QUERYCQDELAY   3   // in quarter of a minute
+#define MAXQSOLIFETIME 4  // in quarter of a minute
+#define QUERYCQDELAY 3    // in quarter of a minute
 
 char qsoLogFileName[] = "QSOLOG.txt";
 
@@ -209,6 +210,67 @@ bool queryCQ(void) {
     return false;
 }
 
+/* Test routines */
+#ifdef TESTQSO
+bool addQso(struct plain_message *newQso);
+
+static struct plain_message testQSO;
+
+void initTestQSO(void) {
+    testQSO.src[0] = 0;   // This is the Peer for the QSO
+    testQSO.dest[0] = 0;  // This is the local callId
+    testQSO.loc[0] = 0;   // This is the Remote Loc
+    testQSO.message[0] = 0;
+    testQSO.freq = 14076001;
+    testQSO.snr = 0;
+    testQSO.tempus = 0;
+    testQSO.ft8slot = odd;
+}
+
+uint32_t testCase = 0;
+
+char *remotes[] = {"AA0ABC", "AB1ABC", "BF9CDE", "FR5BAC"};
+char *rloc[] = {"AB44", "JF12BC", "ZQ14", "ST02"};
+int rpower[] = {-4, 2, -7, -23};
+
+void testCaseExec(ft8slot_t theSlot) {
+    bool testResult;
+
+    if (testCase == 0)
+        initTestQSO();
+
+    if (testCase > 3)
+        return;
+
+    if (testQSO.ft8slot == theSlot) {
+        sprintf(testQSO.src, "%s", remotes[testCase]);
+        testQSO.snr = rpower[testCase];
+
+        if (qsoState == idle) {
+            sprintf(testQSO.message, "%s", rloc[testCase]);
+        }
+        if (qsoState == replyLoc) {
+            sprintf(testQSO.message, "%02d", rpower[testCase]);
+        }
+        if (qsoState == replySig) {
+            sprintf(testQSO.message, "%02d", rpower[testCase]);
+        }
+        if (qsoState == replyRR73) {
+            sprintf(testQSO.message, "%s", "RR73");
+        }
+        if (qsoState == reply73) {
+            sprintf(testQSO.message, "%s", "73");
+            testCase++;
+        }
+
+        testResult = addQso(&testQSO);
+        if (testResult == true)
+            LOG(LOG_DEBUG, "testCaseExec case %d\n", testCase);
+    }
+}
+
+#endif
+
 /*
 This function is to be called at every slot
 after scanning of ft8 messages.
@@ -218,6 +280,10 @@ otherwise it returns false.
 */
 bool updateQsoMachine(ft8slot_t theSlot) {
     ft8tick++;
+
+#ifdef TESTQSO
+    testCaseExec(theSlot);
+#endif
 
     /* Complete the Tx session */
     txBusy = handleTx(theSlot);
