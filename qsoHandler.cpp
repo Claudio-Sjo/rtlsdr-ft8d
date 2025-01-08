@@ -40,13 +40,8 @@
 
 #include "./rtlsdr_ft8d.h"
 #include "./ft8tx/FT8Types.h"
+#include "qsoHandler.h"
 
-// #define DEBUG
-
-#define MAXQSOPEERS 512  // size of the Peer's database
-
-#define MAXQSOLIFETIME 12  // in quarter of a minute
-#define QUERYCQDELAY 3     // in quarter of a minute
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -62,18 +57,14 @@ extern struct receiver_options rx_options;
 extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
-typedef enum _qsostate_t { idle,
-                           replyLoc,
-                           replySig,
-                           replyRR73,
-                           reply73,
-                           cqIng } qsostate_t;
+// #define DEBUG
 
-typedef enum _peermsg_t { cqMsg,
-                          locMsg,
-                          sigMsg,
-                          RR73Msg,
-                          s73Msg } peermsg_t;
+#define MAXQSOPEERS 512  // size of the Peer's database
+
+#define MAXQSOLIFETIME 12  // in quarter of a minute
+#define QUERYCQDELAY 3     // in quarter of a minute
+
+
 
 char qsoLogFileName[] = "QSOLOG.txt";
 
@@ -206,7 +197,7 @@ bool handleTx(ft8slot_t txSlot) {
     }
 }
 
-bool queryCQ() {
+bool queryCQ(void) {
     char cqMessage[255];
     static uint32_t queryRepeat = 0;
 
