@@ -1046,7 +1046,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
-                    qsoPossible = addCQ(&qsoMsg);
+                        /* Don't reply to our own CQ */
+                    if (strcmp(qsoMsg.src, dec_options.rcall))
+                        qsoPossible = addCQ(&qsoMsg);
                 }
 
                 num_decoded++;
@@ -1074,7 +1076,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
 
                     if (qsoPossible == true) {
-                        qsoPossible = addQso(&qsoMsg);
+                        /* Avoid trying a QSO with ourselves */
+                        if (strcmp(qsoMsg.src, dec_options.rcall))
+                            qsoPossible = addQso(&qsoMsg);
                     }
                 }
             }
@@ -1107,7 +1111,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     *n_results = num_decoded;
 
     /* Trigger the QSO Machine, if Idle we can send our CQ */
-    if (updateQsoMachine(thisSlot) == true )
+    if (updateQsoMachine(thisSlot) == true)
         queryCQ();
 }
 
