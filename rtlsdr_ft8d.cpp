@@ -49,6 +49,8 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
+#include "qsoHandler.h"
+
 /* Defines for debug */
 // #define TXWINTEST
 
@@ -863,6 +865,7 @@ ftx_callsign_hash_interface_t hash_if = {
     .save_hash = hashtable_add};
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
+    bool qsoPossible = true;
     /* Get the slot type */
     struct timeval lTime;
     gettimeofday(&lTime, NULL);
@@ -1037,10 +1040,14 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 pthread_mutex_unlock(&msglock);
 
-                snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
-                qsoMsg.freq = (int32_t)freq_hz + 1500;
-                qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
-                qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                if (qsoPossible == true) {
+                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
+                    qsoMsg.freq = (int32_t)freq_hz + 1500;
+                    qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
+                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+
+                    qsoPossible = addCQ(&qsoMsg);
+                }
 
                 num_decoded++;
             } else
@@ -1065,6 +1072,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     pthread_mutex_lock(&QSOlock);  // Protect decodes structure
                     qso_queue.push_back(qsoMsg);
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+
+                    if (qsoPossible == true) {
+                        qsoPossible = addQso(&qsoMsg);
+                    }
                 }
             }
             // In any case we will log the message
@@ -1094,6 +1105,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     *n_results = num_decoded;
+
+    /* Trigger the QSO Machine, if Idle we can send our CQ */
+    if (updateQsoMachine(thisSlot) == true )
+        queryCQ();
 }
 
 void usage(FILE *stream, int32_t status) {

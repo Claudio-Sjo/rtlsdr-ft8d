@@ -5,3 +5,5 @@ rtlsdr_ft8d
 fftw_wisdom.dat
 client
 ft8
+ft8_lib/
+.vscode
