@@ -168,7 +168,7 @@ bool handleTx(ft8slot_t txSlot) {
                         if (currentQSO.snr >= 0)
                             sprintf(theLevel, "+%02d", currentQSO.snr);
                         else
-                            sprintf(theLevel, "-%02d", currentQSO.snr);
+                            sprintf(theLevel, "%02d", currentQSO.snr);
                         sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
                         break;
                     case replyRR73:
@@ -253,9 +253,6 @@ void testCaseExec(ft8slot_t theSlot) {
             sprintf(testQSO.message, "%02d", rpower[testCase]);
         }
         if (qsoState == replySig) {
-            sprintf(testQSO.message, "%02d", rpower[testCase]);
-        }
-        if (qsoState == replyRR73) {
             sprintf(testQSO.message, "%s", "RR73");
         }
         if (qsoState == reply73) {
