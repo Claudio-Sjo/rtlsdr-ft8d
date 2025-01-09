@@ -115,21 +115,15 @@ void logQSO(struct plain_message *completedQSO) {
     fclose(qsoLogFile);
 }
 
-uint32_t hashCallId(char *theCall) {
-    uint32_t theValue = 0;
+uint32_t hashCallId2(const char *callId) {
+    uint32_t hash = 0;
 
-    uint32_t theLength = strlen(theCall);
-    if (theLength > 6) theLength = 6;
-
-    for (uint32_t i = 0; i < theLength; i++) {
-        theValue *= 36;
-        if (theCall[i] >= 'A') {
-            theValue += theCall[i] - 'A' + 10;
-        } else {
-            theValue += theCall[i] - '0';
-        }
+    for (uint32_t i = 6; *callId && i; i--, callId++) {
+        hash *= 36;
+        hash += *callId - '0';
+        if (*callId >= 'A') hash += '0' + 10 -'A';
     }
-    return theValue;
+    return hash;
 }
 
 bool checkPeer(char *thePeer) {
@@ -182,7 +176,7 @@ bool handleTx(ft8slot_t txSlot) {
                         if (currentQSO.snr >= 0)
                             sprintf(theLevel, "+%02d", currentQSO.snr);
                         else
-                            sprintf(theLevel, "%02d", currentQSO.snr);
+                            sprintf(theLevel, "%03d", currentQSO.snr);
                         sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
                         break;
                     case replyRR73:
@@ -450,7 +444,7 @@ bool addQso(struct plain_message *newQso) {
     return false;
 }
 
-/* Thi function is called when autometic CQ answer is enabled */
+/* Thi function is called when automatic CQ answer is enabled */
 bool addCQ(struct plain_message *newQso) {
     if (qsoState != idle)
         return false;
