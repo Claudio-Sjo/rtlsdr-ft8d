@@ -64,8 +64,6 @@ extern std::vector<FT8Msg> tx_queue;
 #define MAXQSOLIFETIME 4  // in quarter of a minute
 #define QUERYCQDELAY 3    // in quarter of a minute
 
-char qsoLogFileName[] = "QSOLOG.txt";
-
 /* Variables */
 static qsostate_t qsoState = idle;
 static struct plain_message currentQSO;
@@ -99,6 +97,22 @@ static void resetQsoState(void) {
     currentQSO.tempus = 0;
     currentQSO.ft8slot = odd;
     ft8time = ft8tick;
+}
+
+/* Methods for QSO logging */
+
+void logQSO(struct plain_message *completedQSO) {
+    char qsoLogFileName[] = "QSOLOG.txt";
+    FILE *qsoLogFile;
+    char timeBuff[20];
+
+    qsoLogFile = fopen(qsoLogFileName, "a");
+
+    strftime(timeBuff, 20, "%Y-%m-%d %H:%M:%S", localtime(&completedQSO->tempus));
+
+    fprintf(qsoLogFile, "%s %d %02d %s %s \n", timeBuff, completedQSO->freq, completedQSO->snr, completedQSO->src, completedQSO->dest);
+
+    fclose(qsoLogFile);
 }
 
 uint32_t hashCallId(char *theCall) {
@@ -229,8 +243,8 @@ void initTestQSO(void) {
 
 uint32_t testCase = 0;
 
-char *remotes[] = {"AA0ABC", "AB1ABC", "BF9CDE", "FR5BAC"};
-char *rloc[] = {"AB44", "JF12BC", "ZQ14", "ST02"};
+const char *remotes[] = {"AA0ABC", "AB1ABC", "BF9CDE", "FR5BAC"};
+const char *rloc[] = {"AB44", "JF12BC", "ZQ14", "ST02"};
 int rpower[] = {-4, 2, -7, -23};
 
 void testCaseExec(ft8slot_t theSlot) {

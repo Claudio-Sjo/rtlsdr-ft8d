@@ -1,7 +1,7 @@
-- FT8 Tx time is 12.6sec, sync this instead of 15sec.
-- Introduce the concept of ODD/EVEN timeslot
-- Measure the actual decoding time of a full frame
-- Add the OD/EVEN information to each decoded message
-- Design a state machine for automated QSO answering
-- Add a QSO Log storage
+- FT8 Tx time is 12.6sec, sync this instead of 15sec. DONE!
+- Introduce the concept of ODD/EVEN timeslot. DONE!
+- Measure the actual decoding time of a full frame. DONE!
+- Add the OD/EVEN information to each decoded message. DONE!
+- Design a state machine for automated QSO answering. Ongoing...
+- Add a QSO Log storage. To be tested...
 - Add an eSQL interface 
