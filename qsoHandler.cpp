@@ -121,7 +121,7 @@ uint32_t hashCallId2(const char *callId) {
     for (uint32_t i = 6; *callId && i; i--, callId++) {
         hash *= 36;
         hash += *callId - '0';
-        if (*callId >= 'A') hash += '0' + 10 -'A';
+        if (*callId >= 'A') hash += '0' + 10 - 'A';
     }
     return hash;
 }
@@ -315,7 +315,7 @@ bool updateQsoMachine(ft8slot_t theSlot) {
 /*
 INPUT - Prev State - Next State   Action
 ------+------------+------------+---------
-CQ    |  !Idle     | No change  | Reject
+CQ    |  !Idle     | No change  | Ignore
 ------+------------+------------+---------
 CQ    |  Idle      | replyLoc   | Accept
 ------+------------+------------+---------
@@ -333,7 +333,7 @@ SIG   |  replySig  | replyRR73  | Accept
 ------+------------+------------+---------
 SIG   |  replyRR73 | replyRR73  | Accept
 ------+------------+------------+---------
-RR73  |  Idle      | reply73    | Close
+RR73  |  Idle      | reply73    | Ignore
 ------+------------+------------+---------
 RR73  |  replyLoc  | reply73    | Close
 ------+------------+------------+---------
@@ -341,15 +341,15 @@ RR73  |  replySig  | reply73    | Close
 ------+------------+------------+---------
 RR73  |  replyRR73 | reply73    | Close
 ------+------------+------------+---------
-73    |  Idle      | Idle       | Close
+73    |  Idle      | Idle       | Ignore
 ------+------------+------------+---------
-73    |  replyLoc  | Idle       | Close
+73    |  replyLoc  | Idle       | Ignore
 ------+------------+------------+---------
-73    |  replySig  | Idle       | Close
+73    |  replySig  | Idle       | Ignore
 ------+------------+------------+---------
-73    |  replyRR73 | Idle       | Close
+73    |  replyRR73 | Idle       | Ignore
 ------+------------+------------+---------
-Tmo   |  Any       | Idle       | Close
+Tmo   |  Any       | Idle       | Ignore
 ------+------------+------------+---------
 
 */
@@ -394,17 +394,16 @@ bool addQso(struct plain_message *newQso) {
         /// currentQSO.tempus = newQso->tempus;
         currentQSO.ft8slot = newQso->ft8slot;
 
-        /* We can only add a QSO when in Idle state */
+        /* We can only add a QSO when in Idle state, CQ are handled in addCQ() */
 
         switch (parseMsg(currentQSO.message)) {
-            case locMsg:
-            case sigMsg:
+            case locMsg:  // He sent LOC here, we reply with SIG
+            case sigMsg:  // He sent SIG here, we laso reply with our SIG
                 qsoState = replySig;
                 break;
-            case RR73Msg:
-                qsoState = reply73;
+            case RR73Msg:  // He sent RR73 when we are Idle. We ignore this
                 break;
-            case s73Msg:
+            case s73Msg:  // He sent 73 when we are IDLE. We ignore this
                 break;
             default:  // This should NEVER happen
                 break;
@@ -419,23 +418,26 @@ bool addQso(struct plain_message *newQso) {
 
         /* Here we are in the case of updating the QSO */
         switch (parseMsg(currentQSO.message)) {
-            case locMsg:
+            case locMsg:  // We are not in Idle, when receiving LOC we reply SIG
                 qsoState = replySig;
                 break;
             case sigMsg:
-                if (qsoState == replyLoc)
+                if (qsoState == replyLoc)  // We have sent LOC, we reply SIG
                     qsoState = replySig;
-                else
+                else  // Otherwise we reply RR73
                     qsoState = replyRR73;
                 break;
-            case RR73Msg:
+            case RR73Msg:  // If we receive RR73 we reply 73 and close the QSO
                 qsoState = reply73;
+                /* Log the QSO */
                 break;
-            case s73Msg:
-                qsoState = idle;
+            case s73Msg:  // When receiving 73 we go to Idle and clean the data
+                resetQsoState(void);
+                // qsoState = idle;
                 break;
             default:
-                qsoState = idle;  // This should NEVER happen
+                resetQsoState(void); // This should NEVER happen
+                // qsoState = idle;  
                 break;
         }
         if (qsoState != idle)
