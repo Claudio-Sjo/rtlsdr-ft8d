@@ -115,7 +115,7 @@ void logQSO(struct plain_message *completedQSO) {
     fclose(qsoLogFile);
 }
 
-uint32_t hashCallId2(const char *callId) {
+uint32_t hashCallId(const char *callId) {
     uint32_t hash = 0;
 
     for (uint32_t i = 6; *callId && i; i--, callId++) {
@@ -203,6 +203,10 @@ bool handleTx(ft8slot_t txSlot) {
 }
 
 bool queryCQ(void) {
+#ifdef TESTQSO
+    return false;
+#endif
+
     char cqMessage[255];
     static uint32_t queryRepeat = 0;
 
@@ -256,17 +260,27 @@ void testCaseExec(ft8slot_t theSlot) {
 
         if (qsoState == idle) {
             sprintf(testQSO.message, "%s", rloc[testCase]);
+            LOG(LOG_DEBUG, "testCaseExec state : idle\n");
         }
         if (qsoState == replyLoc) {
             sprintf(testQSO.message, "%02d", rpower[testCase]);
+            LOG(LOG_DEBUG, "testCaseExec state : replyLoc\n");
         }
         if (qsoState == replySig) {
             sprintf(testQSO.message, "%s", "RR73");
+            LOG(LOG_DEBUG, "testCaseExec state : replySig\n");
+        }
+        if (qsoState == replyRR73) {
+            sprintf(testQSO.message, "%s", "73");
+            LOG(LOG_DEBUG, "testCaseExec state : replyRR73\n");
+            testCase++;
         }
         if (qsoState == reply73) {
             sprintf(testQSO.message, "%s", "73");
-            testCase++;
+            LOG(LOG_DEBUG, "testCaseExec state : reply73\n");
         }
+
+        LOG(LOG_DEBUG, "testCaseExec sent %s\n", testQSO.message);
 
         testResult = addQso(&testQSO);
         if (testResult == true)
@@ -356,23 +370,32 @@ Tmo   |  Any       | Idle       | Ignore
 peermsg_t parseMsg(char *msg) {
     char *ptr = msg;
 
+    LOG(LOG_DEBUG, "parseMsg received %s, length %d --- ", msg, strlen(msg));
+
     if (isdigit(*ptr)) {
-        if (atoi(msg) == 73)
+        if (atoi(msg) == 73) {
+            LOG(LOG_DEBUG, "decoded 73\n");
             return s73Msg;
-        else
+        } else {
+            LOG(LOG_DEBUG, "decoded SIG\n");
             return sigMsg;
+        }
     }
 
     /* Let's check if this is a number */
     if ((*ptr == '+') || (*ptr == '-')) {
+        LOG(LOG_DEBUG, "decoded SIG\n");
         return sigMsg;
     }
 
     if (strlen(msg) == 4) {
-        if ((msg[0] == 'R') && (msg[1] == 'R'))
+        if ((msg[0] == 'R') && (msg[1] == 'R')) {
+            LOG(LOG_DEBUG, "decoded RR73\n");
             return RR73Msg;
-        else
+        } else {
+            LOG(LOG_DEBUG, "decoded LOC\n");
             return locMsg;
+        }
     }
 
     return locMsg;
@@ -399,9 +422,11 @@ bool addQso(struct plain_message *newQso) {
         switch (parseMsg(currentQSO.message)) {
             case locMsg:  // He sent LOC here, we reply with SIG
             case sigMsg:  // He sent SIG here, we laso reply with our SIG
+                LOG(LOG_DEBUG, "addQso received Sig when idle\n");
                 qsoState = replySig;
                 break;
             case RR73Msg:  // He sent RR73 when we are Idle. We ignore this
+                LOG(LOG_DEBUG, "addQso received RR7 when idle\n");
                 break;
             case s73Msg:  // He sent 73 when we are IDLE. We ignore this
                 break;
@@ -416,28 +441,36 @@ bool addQso(struct plain_message *newQso) {
         if (strcmp(newQso->src, currentQSO.src) != 0)
             return false;
 
+        sprintf(currentQSO.message, "%s", newQso->message);
+
         /* Here we are in the case of updating the QSO */
         switch (parseMsg(currentQSO.message)) {
             case locMsg:  // We are not in Idle, when receiving LOC we reply SIG
                 qsoState = replySig;
+                LOG(LOG_DEBUG, "addQso received Loc\n");
                 break;
             case sigMsg:
+                LOG(LOG_DEBUG, "addQso received Sig\n");
                 if (qsoState == replyLoc)  // We have sent LOC, we reply SIG
                     qsoState = replySig;
                 else  // Otherwise we reply RR73
                     qsoState = replyRR73;
                 break;
             case RR73Msg:  // If we receive RR73 we reply 73 and close the QSO
+                LOG(LOG_DEBUG, "addQso received RR73\n");
                 qsoState = reply73;
                 /* Log the QSO */
+#ifdef TESTQSO
+                testCase++;
+#endif
                 break;
             case s73Msg:  // When receiving 73 we go to Idle and clean the data
-                resetQsoState(void);
+                resetQsoState();
                 // qsoState = idle;
                 break;
             default:
-                resetQsoState(void); // This should NEVER happen
-                // qsoState = idle;  
+                resetQsoState();  // This should NEVER happen
+                // qsoState = idle;
                 break;
         }
         if (qsoState != idle)
