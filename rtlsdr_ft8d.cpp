@@ -872,6 +872,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
     ft8slot_t thisSlot = ((lTime.tv_sec / FT8_PERIOD) & 0x01) ? odd : even;
 
+    time_t current_time = time(NULL);
+
     const ftx_waterfall_t *wf = &mon->wf;
     // Find top candidates by Costas sync score and localize them in time and frequency
     ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
@@ -1045,8 +1047,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                    qsoMsg.tempus = current_time;
 
-                        /* Don't reply to our own CQ */
+                    /* Don't reply to our own CQ */
                     if (strcmp(qsoMsg.src, dec_options.rcall))
                         qsoPossible = addCQ(&qsoMsg);
                 }
@@ -1070,6 +1073,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
 
                     qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
+                    qsoMsg.tempus = current_time;
 
                     pthread_mutex_lock(&QSOlock);  // Protect decodes structure
                     qso_queue.push_back(qsoMsg);
@@ -1095,7 +1099,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
             logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-            logMsg.tempus = time(NULL);
+            logMsg.tempus = current_time;
 
             pthread_mutex_lock(&LOGlock);  // Protect decodes structure
             log_queue.push_back(logMsg);

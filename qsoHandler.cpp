@@ -98,9 +98,30 @@ void createADIheader(void) {
         // The file doesn't exist, we need to create and populate it
         // adiFile = fopen(adiFileName, "w");
         adiFile = fopen(adiFileName, "a");
-        fprintf(adiFile, "<PROGRAMID:11>rtlsdr-ft8d<PROGRAMVERSION:4>%s<ADIF_VER:5>3.1.3\n<EOH>\n\n", rtlsdr_ft8d_version);
+        fprintf(adiFile, "<PROGRAMID:11>rtlsdr-ft8d<PROGRAMVERSION:5>%s<ADIF_VER:5>3.1.3\n<EOH>\n\n", rtlsdr_ft8d_version);
         fclose(adiFile);
     }
+}
+
+void logToAdi(struct plain_message *completedQSO){
+        FILE *adiFile;
+            struct tm * timeinfo;
+            char buff[32];
+
+        adiFile = fopen(adiFileName, "a");
+        fprintf(adiFile, "<CALL:%d>%s", strlen(completedQSO->src),completedQSO->src);   // CallId
+        timeinfo = localtime(&completedQSO->tempus);
+        fprintf(adiFile, "<TIME_ON:6>%02d%02d%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);   // Time
+        fprintf(adiFile, "<QSO_DATE_OFF:8>%d%02d%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);   // Date
+
+        sprintf(buff,"%d.%06d",completedQSO->freq/1000000,completedQSO->freq%1000000);
+        fprintf(adiFile, "<FREQ_RX:%d>%s", strlen(buff), buff);   // Rx frequency
+        fprintf(adiFile, "<BAND:3>20M<BAND_RX:3>20M<MODE:3>FT8");   // Data
+        fprintf(adiFile, "<MY_GRIDSQUARE:6>%s<OPERATOR:6>%s",dec_options.rloc ,dec_options.rcall);   // Data
+        fprintf(adiFile, "\n<EOR>\n\n");   // End of Record
+
+        fclose(adiFile);
+
 }
 
 void initQsoState(void) {
@@ -281,7 +302,9 @@ void testCaseExec(ft8slot_t theSlot) {
         initTestQSO();
 
     if (testCase > 3)
-        return;
+        testCase = 0;
+
+    time_t current_time = time(NULL);
 
     if (testQSO.ft8slot == theSlot) {
         sprintf(testQSO.src, "%s", remotes[testCase]);
@@ -289,6 +312,7 @@ void testCaseExec(ft8slot_t theSlot) {
 
         if (qsoState == idle) {
             sprintf(testQSO.message, "%s", rloc[testCase]);
+            testQSO.tempus = current_time;
             LOG(LOG_DEBUG, "testCaseExec state : idle\n");
         }
         if (qsoState == replyLoc) {
@@ -443,7 +467,7 @@ bool addQso(struct plain_message *newQso) {
         sprintf(currentQSO.message, "%s", newQso->message);
         currentQSO.freq = newQso->freq;
         currentQSO.snr = newQso->snr;
-        /// currentQSO.tempus = newQso->tempus;
+        currentQSO.tempus = newQso->tempus;
         currentQSO.ft8slot = newQso->ft8slot;
 
         /* We can only add a QSO when in Idle state, CQ are handled in addCQ() */
@@ -489,6 +513,7 @@ bool addQso(struct plain_message *newQso) {
                 LOG(LOG_DEBUG, "addQso received RR73\n");
                 qsoState = reply73;
                 /* Log the QSO */
+                logToAdi(&currentQSO);
 #ifdef TESTQSO
                 testCase++;
 #endif
