@@ -1113,7 +1113,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     *n_results = num_decoded;
-
+    if (updateQsoMachine(thisSlot) == true)
+    {}
 }
 
 void usage(FILE *stream, int32_t status) {
