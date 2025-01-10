@@ -17,7 +17,7 @@ first be sure that the proper firmware is up to date, if not run
 
 ```bash
 echo "== Install dependencies"
-sudo apt-get update && sudo apt-get -y install build-essential clang cmake libfftw3-dev libusb-1.0-0-dev libcurl4-gnutls-dev ntp git
+sudo apt-get update && sudo apt-get -y install build-essential clang cmake libfftw3-dev libusb-1.0-0-dev libcurl4-gnutls-dev ntp git tmux
 
 echo "== Install rtl-sdr library (on RPi, don't use your distro package)"
 git clone https://github.com/rtlsdrblog/rtl-sdr-blog
@@ -48,6 +48,13 @@ git clone https://github.com/kgoba/ft8_lib
 git submodule update --init --recursive
 make
 sudo make install
+
+# create the directory for logging QSO as ADI files
+if [ -d ~/ft8QSOdir ]; then
+  echo "~/ft8QSOdir does exist."
+  else
+  mkdir ~/ft8QSOdir
+fi
 
 echo "== Start/test rtlsdr-ft8d"
 rtlsdr_ft8d -f 2m -c A1XYZ -l AB12cd -g 29

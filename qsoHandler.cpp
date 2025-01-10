@@ -73,6 +73,36 @@ static bool txBusy;
 static uint32_t peers[MAXQSOPEERS];
 static uint32_t peersIdx = 0;
 
+const char *qsoDir = "/ft8QSOdir/";
+char adiFileName[255];
+
+/* Methods for QSO logging */
+
+void createADIheader(void) {
+    FILE *adiFile;
+
+    time_t current_time = time(NULL);
+
+    const char *homeDir = getenv("HOME");
+
+    // Convert the time to a string using the desired format
+    char date_string[20];
+    strftime(date_string, 20, "%Y-%m-%d", localtime(&current_time));
+
+    sprintf(adiFileName, "%s%s%s.adi", homeDir, qsoDir, date_string);
+    LOG(LOG_DEBUG, "adiFileName is %s\n", adiFileName);
+
+    if (access(adiFileName, F_OK) == 0) {
+        // The file exists
+    } else {
+        // The file doesn't exist, we need to create and populate it
+        // adiFile = fopen(adiFileName, "w");
+        adiFile = fopen(adiFileName, "a");
+        fprintf(adiFile, "<PROGRAMID:11>rtlsdr-ft8d<PROGRAMVERSION:4>%s<ADIF_VER:5>3.1.3\n<EOH>\n\n", rtlsdr_ft8d_version);
+        fclose(adiFile);
+    }
+}
+
 void initQsoState(void) {
     qsoState = idle;
     ft8time = 0;
@@ -85,6 +115,7 @@ void initQsoState(void) {
     currentQSO.tempus = 0;
     currentQSO.ft8slot = odd;
     txBusy = false;
+    createADIheader();
 }
 
 static void resetQsoState(void) {
@@ -98,8 +129,6 @@ static void resetQsoState(void) {
     currentQSO.ft8slot = odd;
     ft8time = ft8tick;
 }
-
-/* Methods for QSO logging */
 
 void logQSO(struct plain_message *completedQSO) {
     char qsoLogFileName[] = "QSOLOG.txt";
