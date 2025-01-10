@@ -171,7 +171,13 @@ uint32_t hashCallId(const char *callId) {
     for (uint32_t i = 6; *callId && i; i--, callId++) {
         hash *= 36;
         hash += *callId - '0';
-        if (*callId >= 'A') hash += '0' + 10 - 'A';
+        if (*callId >= 'A') hash += '0' + 10 -'A';
+    }
+    if (*callId)
+    {
+        hash |= 0x80000000u;
+        hash ^= *callId++ & 0x7Fu;
+        hash ^= (*callId & 0x7Fu) << 7u;
     }
     return hash;
 }
@@ -438,10 +444,15 @@ peermsg_t parseMsg(char *msg) {
         return sigMsg;
     }
 
-    if (strlen(msg) == 4) {
-        if ((msg[0] == 'R') && (msg[1] == 'R')) {
+    if (!strcmp(msg, "RR73")){
             LOG(LOG_DEBUG, "decoded RR73\n");
-            return RR73Msg;
+            return RR73Msg;        
+    }
+
+    if (strlen(msg) == 4) {
+        if ((msg[0] == 'R') && ((msg[1] == '+') || (msg[1] == '-'))) {
+            LOG(LOG_DEBUG, "decoded SIG\n");
+            return sigMsg;
         } else {
             LOG(LOG_DEBUG, "decoded LOC\n");
             return locMsg;
@@ -511,6 +522,9 @@ bool addQso(struct plain_message *newQso) {
                 qsoState = reply73;
                 /* Log the QSO */
                 logToAdi(&currentQSO);
+                /* Add the peer to the hash */
+                if (addPeer(newQso->src) == true)
+                    LOG(LOG_DEBUG, "addQso added %s to the has table\n",newQso->src);
 #ifdef TESTQSO
                 testCase++;
 #endif
