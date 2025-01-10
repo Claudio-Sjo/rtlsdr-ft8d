@@ -1114,9 +1114,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     *n_results = num_decoded;
 
-    /* Trigger the QSO Machine, if Idle we can send our CQ */
-    if (updateQsoMachine(thisSlot) == true)
-        queryCQ();
 }
 
 void usage(FILE *stream, int32_t status) {

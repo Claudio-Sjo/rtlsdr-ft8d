@@ -57,7 +57,7 @@ extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
 /* When testing define the symbol TESTQSO */
-#define TESTQSO
+// #define TESTQSO
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
@@ -208,7 +208,7 @@ void queueTx(char *txString) {
 }
 
 bool handleTx(ft8slot_t txSlot) {
-    if ((qsoState == idle) || (qsoState == cqIng))
+    if (qsoState == idle)
         return false;
     else {
         if (txBusy == false) {
@@ -360,10 +360,7 @@ bool updateQsoMachine(ft8slot_t theSlot) {
     /* Complete the Tx session */
     txBusy = handleTx(theSlot);
 
-    if (qsoState == cqIng)
-        qsoState = idle;
-
-    if (qsoState == idle) return true;
+    if (qsoState == idle) return queryCQ();
 
     /* Check if QSO in timeout, if so close it and return true */
     if (ft8tick >= ft8time) {
