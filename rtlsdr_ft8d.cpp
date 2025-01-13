@@ -49,7 +49,7 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
-#include "qsoHandler.h"
+#include <qsoHandler.h>
 
 /* Defines for debug */
 // #define TXWINTEST
@@ -93,8 +93,8 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.5.0";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.5.0";
+const char *rtlsdr_ft8d_version = "0.6.0";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.0";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -503,7 +503,7 @@ void printSpots(uint32_t n_results) {
 
 #ifdef TXWINTEST
 
-        wprintw(logwLL, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
+        wprintw(trafficW, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
                 rx_state.gtm->tm_hour,
                 rx_state.gtm->tm_min,
                 dec_results[i].snr,
@@ -530,7 +530,7 @@ void printSpots(uint32_t n_results) {
     }
 
 #ifdef TXWINTEST
-    wrefresh(logwLL);
+    wrefresh(trafficW);
 #endif
 }
 
@@ -790,7 +790,7 @@ int32_t decoderSelfTest() {
     uint8_t packed[FTX_LDPC_K_BYTES];
 
     if (pack77(message, packed) < 0) {
-        wprintw(logwL, "Cannot parse message!\n");
+        wprintw(trafficW, "Cannot parse message!\n");
         return 0;
     }
     */
@@ -879,8 +879,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
     int num_candidates = ftx_find_candidates(wf, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
 
-    // wprintw(logwL, "Found %d candidates\n", num_candidates);
-    // wrefresh(logwL);
+    // wprintw(trafficW, "Found %d candidates\n", num_candidates);
+    // wrefresh(trafficW);
 
     // Hash table for decoded messages (to check for duplicates)
     int num_decoded = 0;
@@ -917,19 +917,19 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         if (!ftx_decode_candidate(wf, cand, K_LDPC_ITERS, &message, &status)) {
             if (status.ldpc_errors > 0) {
                 LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
-                // wprintw(logwL, "LDPC decode: %d errors\n", status.ldpc_errors);
-                // wrefresh(logwL);
+                // wprintw(trafficW, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // wrefresh(trafficW);
             } else if (status.crc_calculated != status.crc_extracted) {
                 LOG(LOG_DEBUG, "CRC mismatch!\n");
-                // wprintw(logwL, "CRC mismatch!\n");
-                // wrefresh(logwL);
+                // wprintw(trafficW, "CRC mismatch!\n");
+                // wrefresh(trafficW);
             }
             continue;
         }
 
         LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
-        // wprintw(logwL, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
-        // wrefresh(logwL);
+        // wprintw(trafficW, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // wrefresh(trafficW);
 
         int idx_hash = message.hash % K_MAX_MESSAGES;
         bool found_empty_slot = false;
@@ -940,22 +940,22 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             if (decoded_hashtable[idx_hash] == NULL) {
                 LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
-                // wprintw(logwL, "Found an empty slot\n");
+                // wprintw(trafficW, "Found an empty slot\n");
 
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
                 LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
-                // wprintw(logwL, "Found a duplicate!\n");
+                // wprintw(trafficW, "Found a duplicate!\n");
 
                 found_duplicate = true;
             } else {
                 LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
-                // wprintw(logwL, "Hash table clash!\n");
+                // wprintw(trafficW, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
             }
-            // wrefresh(logwL);
+            // wrefresh(trafficW);
 
         } while (!found_empty_slot && !found_duplicate);
 
@@ -991,8 +991,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
 
-            // wprintw(logwL, "Message to print: %s\n", msgToPrint);
-            // wrefresh(logwL);
+            // wprintw(trafficW, "Message to print: %s\n", msgToPrint);
+            // wrefresh(trafficW);
 
             char *strPtr = strtok((char *)text, " ");
             // Here if the message is mlformed strtok will return NULL, this needs to be handled
@@ -1106,9 +1106,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
 
-            // wprintw(logwL, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
+            // wprintw(trafficW, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
 
-            // wrefresh(logwL);
+            // wrefresh(trafficW);
         }
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
@@ -1329,8 +1329,8 @@ int main(int argc, char **argv) {
     }
 
     if (!rx_options.noreport) {
-        wprintw(logwL, "PSK Reporter Initialized!\n");
-        wrefresh(logwL);
+        wprintw(trafficW, "PSK Reporter Initialized!\n");
+        wrefresh(trafficW);
         reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
 
@@ -1345,24 +1345,24 @@ int main(int argc, char **argv) {
 
     if (rx_options.selftest == true) {
         if (decoderSelfTest()) {
-            wprintw(logwL, "Self-test SUCCESS!\n");
-            wrefresh(logwL);
+            wprintw(trafficW, "Self-test SUCCESS!\n");
+            wrefresh(trafficW);
             return exit_ft8(rx_options.qso, EXIT_SUCCESS);
         } else {
-            wprintw(logwL, "Self-test FAILED!\n");
-            wrefresh(logwL);
+            wprintw(trafficW, "Self-test FAILED!\n");
+            wrefresh(trafficW);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     }
 
     if (rx_options.readfile == true) {
-        wprintw(logwL, "Reading IQ file: %s\n", rx_options.filename);
+        wprintw(trafficW, "Reading IQ file: %s\n", rx_options.filename);
         decodeRecordedFile(rx_options.filename);
         return exit_ft8(rx_options.qso, EXIT_SUCCESS);
     }
 
     if (rx_options.writefile == true) {
-        wprintw(logwL, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
+        wprintw(trafficW, "Saving IQ file planned with prefix: %.8s\n", rx_options.filename);
     }
 
     /* If something goes wrong... */
@@ -1376,30 +1376,30 @@ int main(int argc, char **argv) {
     /* Init & parameter the device */
     rtl_count = rtlsdr_get_device_count();
     if (!rtl_count) {
-        wprintw(logwL, "No supported devices found\n");
-        wrefresh(logwL);
+        wprintw(trafficW, "No supported devices found\n");
+        wrefresh(trafficW);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
-    wprintw(logwL, "Found %d device(s):\n", rtl_count);
+    wprintw(trafficW, "Found %d device(s):\n", rtl_count);
     for (uint32_t i = 0; i < rtl_count; i++) {
         rtlsdr_get_device_usb_strings(i, rtl_vendor, rtl_product, rtl_serial);
-        wprintw(logwL, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
+        wprintw(trafficW, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
     }
 
-    wprintw(logwL, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
-    wrefresh(logwL);
+    wprintw(trafficW, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
+    wrefresh(trafficW);
 
     rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
     if (rtl_result < 0) {
-        wprintw(logwL, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
+        wprintw(trafficW, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     if (rx_options.directsampling) {
         rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
         if (rtl_result < 0) {
-            wprintw(logwL, "ERROR: Failed to set direct sampling\n");
+            wprintw(trafficW, "ERROR: Failed to set direct sampling\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1407,14 +1407,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
     if (rtl_result < 0) {
-        wprintw(logwL, "ERROR: Failed to set sample rate\n");
+        wprintw(trafficW, "ERROR: Failed to set sample rate\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
     if (rtl_result < 0) {
-        wprintw(logwL, "ERROR: Failed to enable manual gain\n");
+        wprintw(trafficW, "ERROR: Failed to enable manual gain\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1422,14 +1422,14 @@ int main(int argc, char **argv) {
     if (rx_options.autogain) {
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
         if (rtl_result != 0) {
-            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
+            wprintw(trafficW, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
     } else {
         rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
         if (rtl_result != 0) {
-            wprintw(logwL, "ERROR: Failed to set tuner gain\n");
+            wprintw(trafficW, "ERROR: Failed to set tuner gain\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1438,7 +1438,7 @@ int main(int argc, char **argv) {
     if (rx_options.ppm != 0) {
         rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
         if (rtl_result < 0) {
-            wprintw(logwL, "ERROR: Failed to set ppm error\n");
+            wprintw(trafficW, "ERROR: Failed to set ppm error\n");
             rtlsdr_close(rtl_device);
             return exit_ft8(rx_options.qso, EXIT_FAILURE);
         }
@@ -1446,14 +1446,14 @@ int main(int argc, char **argv) {
 
     rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
     if (rtl_result < 0) {
-        wprintw(logwL, "ERROR: Failed to set frequency\n");
+        wprintw(trafficW, "ERROR: Failed to set frequency\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
     rtl_result = rtlsdr_reset_buffer(rtl_device);
     if (rtl_result < 0) {
-        wprintw(logwL, "ERROR: Failed to reset buffers.\n");
+        wprintw(trafficW, "ERROR: Failed to reset buffers.\n");
         rtlsdr_close(rtl_device);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
@@ -1465,17 +1465,17 @@ int main(int argc, char **argv) {
     struct tm *gtm = gmtime(&rawtime);
 
     /* Print used parameter */
-    wprintw(logwL, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
+    wprintw(trafficW, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",
             gtm->tm_year + 1900, gtm->tm_mon + 1, gtm->tm_mday, gtm->tm_hour, gtm->tm_min, rtlsdr_ft8d_version);
-    wprintw(logwL, "  Callsign     : %s\n", dec_options.rcall);
-    wprintw(logwL, "  Locator      : %s\n", dec_options.rloc);
-    wprintw(logwL, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
-    wprintw(logwL, "  Real freq.   : %d Hz\n", rx_options.realfreq);
-    wprintw(logwL, "  PPM factor   : %d\n", rx_options.ppm);
+    wprintw(trafficW, "  Callsign     : %s\n", dec_options.rcall);
+    wprintw(trafficW, "  Locator      : %s\n", dec_options.rloc);
+    wprintw(trafficW, "  Dial freq.   : %d Hz\n", rx_options.dialfreq);
+    wprintw(trafficW, "  Real freq.   : %d Hz\n", rx_options.realfreq);
+    wprintw(trafficW, "  PPM factor   : %d\n", rx_options.ppm);
     if (rx_options.autogain)
-        wprintw(logwL, "  Auto gain    : enable\n");
+        wprintw(trafficW, "  Auto gain    : enable\n");
     else
-        wprintw(logwL, "  Gain         : %d dB\n", rx_options.gain / 10);
+        wprintw(trafficW, "  Gain         : %d dB\n", rx_options.gain / 10);
 
     hashtable_init();
     initQsoState();
@@ -1486,14 +1486,14 @@ int main(int argc, char **argv) {
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = FT8_BUFRESET - usec;
     uint32_t ft8wait;
-    wprintw(logwL, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
-    wrefresh(logwL);
+    wprintw(trafficW, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+    wrefresh(trafficW);
 
     sleep((uwait / 1000000) > 3 ? (uwait / 1000000) : 3);
 
-    wclear(logwL);
-    wrefresh(logwL);
-    wattrset(logwL, A_NORMAL);
+    wclear(trafficW);
+    wrefresh(trafficW);
+    wattrset(trafficW, A_NORMAL);
     printHeaders();
 
     /* Prepare a low priority param for the decoder thread */
@@ -1580,7 +1580,7 @@ int main(int argc, char **argv) {
     pthread_cond_destroy(&decThread.ready_cond);
     pthread_mutex_destroy(&decThread.ready_mutex);
 
-    wprintw(logwL, "Bye!\n");
+    wprintw(trafficW, "Bye!\n");
 
     return exit_ft8(rx_options.qso, EXIT_SUCCESS);
 }
@@ -1656,10 +1656,10 @@ void ft8_subsystem(float *iSamples,
 
 int num_candidates = ftx_find_candidates(&power, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
 
-        wprintw(logwL, "Looking or candidates\n");
+        wprintw(trafficW, "Looking or candidates\n");
 
-wprintw(logwL, "Found %d candidates\n", num_candidates);
-wrefresh(logwL);
+wprintw(trafficW, "Found %d candidates\n", num_candidates);
+wrefresh(trafficW);
 */
 
     monitor_t mon;
@@ -1693,4 +1693,20 @@ wrefresh(logwL);
     mon.wf.protocol = FTX_PROTOCOL_FT8;
 
     decode(&mon, NULL, decodes, n_results);
+}
+
+void enableReporting(void){
+    rx_options.noreport = false;
+}
+
+void disableReporting(void){
+    rx_options.noreport = true;
+}
+
+bool getReportingStatus(void){
+    return (rx_options.noreport == false);
+}
+
+void programQuit(void){
+    rx_state.exit_flag = true;
 }

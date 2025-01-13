@@ -181,3 +181,8 @@ float whiteGaussianNoise(float factor);
 int32_t decoderSelfTest();
 void usage(FILE *stream, int32_t status);
 void ft8_subsystem(float *iSamples, float *qSamples, uint32_t samples_len, struct decoder_results *decodes, int32_t *n_results);
+
+void enableReporting(void);
+void disableReporting(void);
+bool getReportingStatus(void);
+void programQuit(void);

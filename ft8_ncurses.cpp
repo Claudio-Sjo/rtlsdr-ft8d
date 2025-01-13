@@ -14,8 +14,9 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#include "./rtlsdr_ft8d.h"
-#include "./ft8tx/FT8Types.h"
+#include <rtlsdr_ft8d.h>
+#include <ft8tx/FT8Types.h>
+#include <qsoHandler.h>
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -35,7 +36,9 @@ std::vector<FT8Msg> tx_queue;
 
 WINDOW *header;
 
-WINDOW *logw0L, *logw0R, *logwL, *logwR, *logwLH;
+WINDOW *statusW, *statusW0;
+
+WINDOW *trafficW0, *cqW0, *trafficW, *cqW, *trafficWH;
 
 WINDOW *qso, *qso0;
 
@@ -52,17 +55,30 @@ int activeWin = CQWIN;
 
 char txString[MAXTXSTRING];
 char editString[MAXTXSTRING];
-char destString[MAXTXSTRING];
 
 struct decoder_results cqReq[MAXCQ];
 struct plain_message qsoReq[MAXCQ];
 int cqFirst, cqLast, cqIdx;
 int qsoFirst, qsoLast, qsoIdx;
 
-int logWLines;
+int trafficWLines;
 int qsoWLines;
 uint32_t qsoFreq;
 uint32_t reportedCQ;
+
+bool transmitting = false;
+
+void setTransmitting(void) {
+    transmitting = true;
+}
+
+void resetTransmitting(void) {
+    transmitting = false;
+}
+
+bool getTransmitting(void) {
+    return (transmitting == true);
+}
 
 int init_ncurses(uint32_t initialFreq) {
     /*
@@ -92,16 +108,22 @@ int init_ncurses(uint32_t initialFreq) {
 
     header = subwin(stdscr, 1, COLS - 2, 1, 1);
 
-    logw0L = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
-    logw0R = subwin(stdscr, LINES / 2, (COLS / 2) - 2, 2, (COLS / 2) + 1);
-    logwLH = subwin(stdscr, 1, COLS / 2 - 3, 3, 3);
-    logwL = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
-    logwR = subwin(stdscr, (LINES / 2) - 2, (COLS / 2) - 5, 3, (COLS / 2) + 2);
+    /* Status Window is in the right, traffic window is at the left */
 
-    logWLines = (LINES / 2) - 3;  // Lines for scroll need not to include the Header Line
+    // WINDOW *subwin(n_raw, n_col, init_raw, init_col);
 
-    qso0 = subwin(stdscr, (LINES / 2) - 5, COLS - 2, LINES / 2 + 2, 1);
-    qso = subwin(stdscr, (LINES / 2) - 7, COLS - 4, LINES / 2 + 3, 3);
+    trafficW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
+    trafficW0 = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
+    trafficWLines = (LINES / 2) - 3;  // Lines for scroll need not to include the Header Line
+
+    statusW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 5, 4, (COLS / 2) + 2);
+    statusW0 = subwin(stdscr, LINES / 2, COLS / 2 - 3, 2, (COLS / 2) + 1);
+
+    cqW0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
+    cqW = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
+
+    qso0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2), (LINES / 2) + 2, 1);
+    qso = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 3, (LINES / 2) + 3, 3);
     qsoWLines = getmaxy(qso);
 
     call0 = subwin(stdscr, 3, COLS - 2, LINES - 4, 1);
@@ -119,19 +141,22 @@ int init_ncurses(uint32_t initialFreq) {
     init_pair(14, COLOR_BLACK, COLOR_CYAN);
 
     attrset(COLOR_PAIR(1) | A_BOLD);
-    wattrset(logw0L, COLOR_PAIR(3) | A_BOLD);
-    wattrset(logw0R, COLOR_PAIR(3) | A_BOLD);
+    wattrset(trafficW0, COLOR_PAIR(3) | A_BOLD);
+    wattrset(cqW0, COLOR_PAIR(3) | A_BOLD);
     wattrset(qso0, COLOR_PAIR(3) | A_BOLD);
     wattrset(call0, COLOR_PAIR(4) | A_BOLD);
+    wattrset(statusW0, COLOR_PAIR(3) | A_BOLD);
 
     box(stdscr, 0, 0);
 
-    box(logw0L, 0, 0);
-    box(logw0R, 0, 0);
+    box(trafficW0, 0, 0);
+    box(cqW0, 0, 0);
 
     box(qso0, 0, 0);
 
     box(call0, 0, 0);
+
+    box(statusW0, 0, 0);
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
     /* Print the header */
@@ -141,21 +166,38 @@ int init_ncurses(uint32_t initialFreq) {
 
     //   mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-    mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
+    mvwprintw(cqW0, 0, 10, " CQ Reply Mode ");
 
-    wattrset(logwL, A_NORMAL);
-    wattrset(logwR, A_NORMAL);
+    wattrset(trafficW, A_NORMAL);
+    wattrset(cqW, A_NORMAL);
     wattrset(qso, A_NORMAL);
     wattrset(call, A_NORMAL);
 
-    scrollok(logwL, true);
-    idlok(logwL, true);
+    scrollok(trafficW, true);
+    idlok(trafficW, true);
 
-    scrollok(logwL, true);
-    idlok(logwL, true);
+    scrollok(trafficW, true);
+    idlok(trafficW, true);
 
     scrollok(qso, true);
     idlok(qso, true);
+
+    /* Headers */
+    box(trafficW0, 0, 0);
+    mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
+    wrefresh(trafficW0);
+
+    box(statusW0, 0, 0);
+    mvwprintw(statusW0, 0, 10, " Transceiver Status ");
+    wrefresh(statusW0);
+
+    box(qso0, 0, 0);
+    mvwprintw(qso0, 0, 10, " Ongoing QSO ");
+    wrefresh(qso0);
+
+    box(cqW0, 0, 0);
+    mvwprintw(cqW0, 0, 10, " Incoming CQ ");
+    wrefresh(cqW0);
 
     refresh();
 
@@ -275,6 +317,8 @@ void *TXHandler(void *vargp) {
                 perror("Error, nothing read");
             }
             txStatusFlag = TX_ONGOING;
+            setTransmitting();
+
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
             kbd_queue.push_back(key);
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
@@ -284,6 +328,8 @@ void *TXHandler(void *vargp) {
                 perror("Error, nothing read");
             }
             txStatusFlag = TX_END;
+            resetTransmitting();
+
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
             kbd_queue.push_back(key);
             pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
@@ -302,6 +348,23 @@ void *TXHandler(void *vargp) {
 }
 
 // End of the tx interface
+
+/* Status Interface */
+void refreshStatus(bool refresh) {
+    if (!refresh)
+        return;
+    mvwprintw(statusW, 0, 3, " PSK Report : %s", getReportingStatus() ? "ON " : "OFF");
+    mvwprintw(statusW, 1, 3, " Auto Reply : %s", getAutoCQReplyStatus() ? "ON " : "OFF");
+    mvwprintw(statusW, 2, 3, " Self CQ    : %s", getAutoCQStatus() ? "ON " : "OFF");
+    mvwprintw(statusW, 3, 3, " Self QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
+
+    mvwprintw(statusW, 5, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
+
+    mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, AUTOCQ ON/OFF");
+    mvwprintw(statusW, 9, 3, "          SELFCQ ON/OFF, SELFQSO ON/OFF");
+
+    wrefresh(statusW);
+}
 
 #define IDLE 0
 #define ESC1 27
@@ -343,25 +406,36 @@ void *KBDHandler(void *vargp) {
                         // key = 0;
                         break;
 
-                    case ENTER:  // Activate transmission
-                        switch (activeWin) {
-                            case CQWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].freq, cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
-                                break;
-                            case QSOWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d %s %s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].freq, qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall, editString);
-                                break;
-                            case TXWIN:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d %s", qsoFreq, editString);
-                                break;
-                            default:
-                                sprintf(Txletter.ft8Message, "FT8Tx %d SA0PRF SA0PRF JO99", qsoFreq);
-                                break;
-                        }
+                    case ENTER:  // Parse the message and take a decision
+                        if (!strcmp(editString, "AUTOCQ ON"))
+                            enableAutoCQ();
+                        if (!strcmp(editString, "AUTOCQ OFF"))
+                            disableAutoCQ();
 
+                        if (!strcmp(editString, "PSK ON"))
+                            enableReporting();
+                        if (!strcmp(editString, "PSK OFF"))
+                            disableReporting();
+
+                        if (!strcmp(editString, "SELFCQ ON"))
+                            enableAutoCQReply();
+                        if (!strcmp(editString, "SELFCQ OFF"))
+                            disableAutoCQReply();
+
+                        if (!strcmp(editString, "SELFQSO ON"))
+                            enableAutoQSO();
+                        if (!strcmp(editString, "SELFQSO OFF"))
+                            disableAutoQSO();
+
+                        if (!strcmp(editString, "QUIT"))
+                            programQuit();                            
+
+                        sprintf(editString,"");
+/*
                         pthread_mutex_lock(&TXlock);  // Protect key queue structure
                         tx_queue.push_back(Txletter);
                         pthread_mutex_unlock(&TXlock);  // Protect key queue structure
+                        */
                         break;
                     case DEL:
                         if (ix)
@@ -392,7 +466,7 @@ void *KBDHandler(void *vargp) {
                         if (cqFirst < cqLast) {
                             if (cqIdx < (cqLast - 1))
                                 cqIdx++;
-                        } else if (cqIdx < (logWLines - 1))
+                        } else if (cqIdx < (trafficWLines - 1))
                             cqIdx++;
                     }
                     key = 0;
@@ -423,14 +497,14 @@ void printCQ(bool refresh) {
     /* Reset the cursor position */
 
     if (cqFirst != cqLast) {
-        wmove(logwR, 0, 0);
-        wrefresh(logwR);
+        wmove(cqW, 0, 0);
+        wrefresh(cqW);
 
-        wattrset(logwR, A_NORMAL | A_BOLD);
+        wattrset(cqW, A_NORMAL | A_BOLD);
 
-        wprintw(logwR, "    Incoming CQ Requests\n");
+        wprintw(cqW, "    Incoming CQ Requests\n");
 
-        wattrset(logwR, A_NORMAL);
+        wattrset(cqW, A_NORMAL);
 
         if (cqLast > cqFirst) {
             for (int i = cqFirst; i < cqLast; i++) {
@@ -438,13 +512,13 @@ void printCQ(bool refresh) {
             if (i == cqIdx) {
 
                 if (activeWin == CQWIN)
-                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                    wattrset(cqW, COLOR_PAIR(12) | A_BOLD);
                 else
-                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+                    wattrset(cqW, COLOR_PAIR(2) | A_BOLD);
             } else
                                 */
 
-                wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
+                wprintw(cqW, " %.6s DE  %13s freq. %8dHz %2ddB\n",
                         cqReq[i].cmd,
                         cqReq[i].call,
                         cqReq[i].freq,
@@ -452,27 +526,27 @@ void printCQ(bool refresh) {
             }
         } else {
             int idx = cqFirst;
-            for (int i = 0; i < logWLines; i++) {
+            for (int i = 0; i < trafficWLines; i++) {
                 /*
                 if (i == cqIdx) {
                 if (activeWin == CQWIN)
-                    wattrset(logwR, COLOR_PAIR(12) | A_BOLD);
+                    wattrset(cqW, COLOR_PAIR(12) | A_BOLD);
                 else
-                    wattrset(logwR, COLOR_PAIR(2) | A_BOLD);
+                    wattrset(cqW, COLOR_PAIR(2) | A_BOLD);
                 } else
-                wattrset(logwR, A_NORMAL);
+                wattrset(cqW, A_NORMAL);
                 */
-                wprintw(logwR, " %.6s DE  %13s freq. %8dHz %2ddB\n",
-                        cqReq[(i + cqFirst) % logWLines].cmd,
-                        cqReq[(i + cqFirst) % logWLines].call,
-                        cqReq[(i + cqFirst) % logWLines].freq,
-                        cqReq[(i + cqFirst) % logWLines].snr);
+                wprintw(cqW, " %.6s DE  %13s freq. %8dHz %2ddB\n",
+                        cqReq[(i + cqFirst) % trafficWLines].cmd,
+                        cqReq[(i + cqFirst) % trafficWLines].call,
+                        cqReq[(i + cqFirst) % trafficWLines].freq,
+                        cqReq[(i + cqFirst) % trafficWLines].snr);
 
-                idx = (idx + 1) % logWLines;
+                idx = (idx + 1) % trafficWLines;
             }
         }
-        wattrset(logwR, A_NORMAL);
-        wrefresh(logwR);
+        wattrset(cqW, A_NORMAL);
+        wrefresh(cqW);
     }
 }
 
@@ -556,7 +630,7 @@ void printCall(bool refresh) {
 
     /*
         if (activeWin == CQWIN)
-            sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % logWLines].call, dec_options.rcall, dec_options.rloc);
+            sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % trafficWLines].call, dec_options.rcall, dec_options.rloc);
         if (activeWin == QSOWIN)
             sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
         if (activeWin == TXWIN)
@@ -601,13 +675,13 @@ void printCall(bool refresh) {
 void printLog(plain_message *logMsg) {
     char timeString[10];
 
-    wattrset(logwL, A_NORMAL);
+    wattrset(trafficW, A_NORMAL);
 
-    if (!strncmp(logMsg->dest, "CQ", 2))          // CQ messages are RED
-        wattrset(logwL, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
+    if (!strncmp(logMsg->dest, "CQ", 2))             // CQ messages are RED
+        wattrset(trafficW, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
 
     if (!strncmp(logMsg->message, dec_options.rcall, strlen(dec_options.rcall)))
-        wattrset(logwL, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+        wattrset(trafficW, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
     /* convert to localtime */
     struct tm *local = localtime(&logMsg->tempus);
@@ -615,7 +689,7 @@ void printLog(plain_message *logMsg) {
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-    wprintw(logwL, "%s %dHz  %3ddB %s %s %s\n",
+    wprintw(trafficW, "%s %dHz  %3ddB %s %s %s\n",
             timeString,
             logMsg->freq,
             logMsg->snr - 20,
@@ -623,14 +697,14 @@ void printLog(plain_message *logMsg) {
             logMsg->src,
             logMsg->message);
 
-    wrefresh(logwL);
-    wattrset(logwL, A_NORMAL);
+    wrefresh(trafficW);
+    wattrset(trafficW, A_NORMAL);
 }
 
 /* A new CQ request has been received, let's add it to the table */
 bool addToCQ(struct decoder_results *dr) {
     /* Is the caller already in the table? */
-    for (uint32_t i = 0; i < logWLines; i++)
+    for (uint32_t i = 0; i < trafficWLines; i++)
         if (strcmp(dr->call, cqReq[i].call) == 0) {
             cqReq[i].tempus = dr->tempus;
             return false;  // Found! we don't add anything
@@ -642,9 +716,9 @@ bool addToCQ(struct decoder_results *dr) {
     strcpy(cqReq[cqLast].call, dr->call);
     cqReq[cqLast].tempus = dr->tempus;
 
-    cqLast = (cqLast + 1) % logWLines;
+    cqLast = (cqLast + 1) % trafficWLines;
     if (cqLast == cqFirst)
-        cqFirst = (cqFirst + 1) % logWLines;
+        cqFirst = (cqFirst + 1) % trafficWLines;
 
     return true;
 }
@@ -673,27 +747,29 @@ bool addToQSO(struct plain_message *qsoMsg) {
 }
 
 void printHeaders(void) {
-    wattrset(logwLH, A_NORMAL | A_BOLD);
-    mvwprintw(logwLH, 0, 0, "   Freq       SNR Msg\n");
-    wattrset(logwLH, A_NORMAL);
+    wattrset(trafficWH, A_NORMAL | A_BOLD);
+    mvwprintw(trafficWH, 0, 0, "   Freq       SNR Msg\n");
+    wattrset(trafficWH, A_NORMAL);
 
-    wrefresh(logwLH);
+    wrefresh(trafficWH);
 
-    wattrset(logwR, A_NORMAL | A_BOLD);
+    wattrset(cqW, A_NORMAL | A_BOLD);
 
-    wprintw(logwR, "    Incoming CQ Requests\n");
-    wattrset(logwR, A_NORMAL);
+    wprintw(cqW, "    Incoming CQ Requests\n");
+    wattrset(cqW, A_NORMAL);
 
-    wrefresh(logwR);
+    wrefresh(cqW);
 }
 
-// Focus on the chosen window
+/*
+** Focus on the chosen window **
 void focusOnWin(int whatWin) {
+    return;
     switch (whatWin) {
         case CQWIN:
-            box(logw0R, 0, 0);
-            mvwprintw(logw0R, 0, 10, " CQ Reply Mode ");
-            wrefresh(logw0R);
+            box(cqW0, 0, 0);
+            mvwprintw(cqW0, 0, 10, " CQ Reply Mode ");
+            wrefresh(cqW0);
             box(qso0, 0, 0);
             wrefresh(qso0);
             box(call0, 0, 0);
@@ -703,8 +779,8 @@ void focusOnWin(int whatWin) {
             box(qso0, 0, 0);
             mvwprintw(qso0, 0, 10, " QSO Reply Mode ");
             wrefresh(qso0);
-            box(logw0R, 0, 0);
-            wrefresh(logw0R);
+            box(cqW0, 0, 0);
+            wrefresh(cqW0);
             box(call0, 0, 0);
             wrefresh(call0);
             break;
@@ -714,11 +790,12 @@ void focusOnWin(int whatWin) {
             wrefresh(call0);
             box(qso0, 0, 0);
             wrefresh(qso0);
-            box(logw0R, 0, 0);
-            wrefresh(logw0R);
+            box(cqW0, 0, 0);
+            wrefresh(cqW0);
             break;
     }
 }
+*/
 
 #define FORCEREFRESH 100  // in 10th of msec
 
@@ -784,6 +861,7 @@ void *CQHandler(void *vargp) {
         printCQ(termRefresh);
         printQSO(termRefresh);
         printCall(termRefresh);
+        refreshStatus(termRefresh);
         if (termRefresh)
             refresh();
         if (clockRefresh-- == 0) {

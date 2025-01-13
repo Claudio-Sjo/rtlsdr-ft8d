@@ -31,8 +31,8 @@
 #include <pskreporter.hpp>
 #include <ft8_ncurses.h>
 
-#include "./rtlsdr_ft8d.h"
-#include "./ft8tx/FT8Types.h"
+#include <rtlsdr_ft8d.h>
+#include <ft8tx/FT8Types.h>
 
 typedef enum _qsostate_t { idle,
                            replyLoc,
@@ -52,3 +52,13 @@ bool queryCQ(void);
 bool updateQsoMachine(ft8slot_t theSlot);
 bool addQso(struct plain_message *newQso);
 bool addCQ(struct plain_message *newQso);
+
+void enableAutoCQ(void);
+void disableAutoCQ(void);
+bool getAutoCQStatus(void);
+void enableAutoCQReply(void);
+void disableAutoCQReply(void);
+bool getAutoCQReplyStatus(void);
+void enableAutoQSO(void);
+void disableAutoQSO(void);
+bool getAutoQSOStatus(void);

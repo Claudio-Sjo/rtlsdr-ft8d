@@ -73,6 +73,10 @@ static bool txBusy;
 static uint32_t peers[MAXQSOPEERS];
 static uint32_t peersIdx = 0;
 
+static bool autoCq = false;
+static bool autoCqReply = false;
+static bool autoQSO = false;
+
 const char *qsoDir = "/ft8QSOdir/";
 char adiFileName[255];
 
@@ -103,25 +107,24 @@ void createADIheader(void) {
     }
 }
 
-void logToAdi(struct plain_message *completedQSO){
-        FILE *adiFile;
-            struct tm * timeinfo;
-            char buff[32];
+void logToAdi(struct plain_message *completedQSO) {
+    FILE *adiFile;
+    struct tm *timeinfo;
+    char buff[32];
 
-        adiFile = fopen(adiFileName, "a");
-        fprintf(adiFile, "<CALL:%d>%s", strlen(completedQSO->src),completedQSO->src);   // CallId
-        timeinfo = localtime(&completedQSO->tempus);
-        fprintf(adiFile, "<TIME_ON:6>%02d%02d%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);   // Time
-        fprintf(adiFile, "<QSO_DATE_OFF:8>%d%02d%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);   // Date
+    adiFile = fopen(adiFileName, "a");
+    fprintf(adiFile, "<CALL:%d>%s", strlen(completedQSO->src), completedQSO->src);  // CallId
+    timeinfo = localtime(&completedQSO->tempus);
+    fprintf(adiFile, "<TIME_ON:6>%02d%02d%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);                 // Time
+    fprintf(adiFile, "<QSO_DATE_OFF:8>%d%02d%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);  // Date
 
-        sprintf(buff,"%d.%06d",completedQSO->freq/1000000,completedQSO->freq%1000000);
-        fprintf(adiFile, "<FREQ_RX:%d>%s", strlen(buff), buff);   // Rx frequency
-        fprintf(adiFile, "<BAND:3>20M<BAND_RX:3>20M<MODE:3>FT8");   // Data
-        fprintf(adiFile, "<MY_GRIDSQUARE:6>%s<OPERATOR:6>%s",dec_options.rloc ,dec_options.rcall);   // Data
-        fprintf(adiFile, "\n<EOR>\n\n");   // End of Record
+    sprintf(buff, "%d.%06d", completedQSO->freq / 1000000, completedQSO->freq % 1000000);
+    fprintf(adiFile, "<FREQ_RX:%d>%s", strlen(buff), buff);                                      // Rx frequency
+    fprintf(adiFile, "<BAND:3>20M<BAND_RX:3>20M<MODE:3>FT8");                                    // Data
+    fprintf(adiFile, "<MY_GRIDSQUARE:6>%s<OPERATOR:6>%s", dec_options.rloc, dec_options.rcall);  // Data
+    fprintf(adiFile, "\n<EOR>\n\n");                                                             // End of Record
 
-        fclose(adiFile);
-
+    fclose(adiFile);
 }
 
 void initQsoState(void) {
@@ -171,10 +174,9 @@ uint32_t hashCallId(const char *callId) {
     for (uint32_t i = 6; *callId && i; i--, callId++) {
         hash *= 36;
         hash += *callId - '0';
-        if (*callId >= 'A') hash += '0' + 10 -'A';
+        if (*callId >= 'A') hash += '0' + 10 - 'A';
     }
-    if (*callId)
-    {
+    if (*callId) {
         hash |= 0x80000000u;
         hash ^= *callId++ & 0x7Fu;
         hash ^= (*callId & 0x7Fu) << 7u;
@@ -262,6 +264,8 @@ bool queryCQ(void) {
 #ifdef TESTQSO
     return false;
 #endif
+    if (!autoCq)
+        return false;
 
     char cqMessage[255];
     static uint32_t queryRepeat = 0;
@@ -444,9 +448,9 @@ peermsg_t parseMsg(char *msg) {
         return sigMsg;
     }
 
-    if (!strcmp(msg, "RR73")){
-            LOG(LOG_DEBUG, "decoded RR73\n");
-            return RR73Msg;        
+    if (!strcmp(msg, "RR73")) {
+        LOG(LOG_DEBUG, "decoded RR73\n");
+        return RR73Msg;
     }
 
     if (strlen(msg) == 4) {
@@ -463,6 +467,8 @@ peermsg_t parseMsg(char *msg) {
 }
 
 bool addQso(struct plain_message *newQso) {
+    if (!autoQSO)
+        return false;
     /* We accept new QSO if we are Idle */
     if (qsoState == idle) {
         /* If we had already a QSO with that peer we reject the QSO */
@@ -524,7 +530,7 @@ bool addQso(struct plain_message *newQso) {
                 logToAdi(&currentQSO);
                 /* Add the peer to the hash */
                 if (addPeer(newQso->src) == true)
-                    LOG(LOG_DEBUG, "addQso added %s to the hash table\n",newQso->src);
+                    LOG(LOG_DEBUG, "addQso added %s to the hash table\n", newQso->src);
 #ifdef TESTQSO
                 testCase++;
 #endif
@@ -546,6 +552,9 @@ bool addQso(struct plain_message *newQso) {
 
 /* Thi function is called when automatic CQ answer is enabled */
 bool addCQ(struct plain_message *newQso) {
+    if (!autoCqReply)
+        return false;
+
     if (qsoState != idle)
         return false;
 
@@ -567,4 +576,40 @@ bool addCQ(struct plain_message *newQso) {
     qsoState = replyLoc;  // This is a CQ
 
     return true;
+}
+
+void enableAutoCQ(void) {
+    autoCq = true;
+}
+
+void disableAutoCQ(void) {
+    autoCq = false;
+}
+
+bool getAutoCQStatus(void) {
+    return (autoCq == true);
+}
+
+void enableAutoCQReply(void) {
+    autoCqReply = true;
+}
+
+void disableAutoCQReply(void) {
+    autoCqReply = false;
+}
+
+bool getAutoCQReplyStatus(void) {
+    return (autoCqReply == true);
+}
+
+void enableAutoQSO(void) {
+    autoQSO = true;
+}
+
+void disableAutoQSO(void) {
+    autoQSO = false;
+}
+
+bool getAutoQSOStatus(void) {
+    return (autoQSO == true);
 }
