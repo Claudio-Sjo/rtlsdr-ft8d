@@ -524,7 +524,7 @@ bool addQso(struct plain_message *newQso) {
                 logToAdi(&currentQSO);
                 /* Add the peer to the hash */
                 if (addPeer(newQso->src) == true)
-                    LOG(LOG_DEBUG, "addQso added %s to the has table\n",newQso->src);
+                    LOG(LOG_DEBUG, "addQso added %s to the hash table\n",newQso->src);
 #ifdef TESTQSO
                 testCase++;
 #endif

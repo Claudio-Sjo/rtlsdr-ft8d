@@ -1,6 +1,6 @@
 # rtlsdr-ft8d -- Single-Band HF FT8 transceiver based on RTL receiver
 
-![rtlsdr-wsprd](art/rtlsdr-ft8d-web.jpg)
+![rtlsdr-wsprd](art/ft8-rtx_proto.png)
 
 ![Project Status](https://img.shields.io/badge/status-OK-green)
 ![Workflow Status](https://img.shields.io/github/workflow/status/Claudio-Sjo/rtlsdr-ft8d/CI)
