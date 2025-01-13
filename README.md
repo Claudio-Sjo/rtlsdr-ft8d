@@ -17,7 +17,7 @@ first be sure that the proper firmware is up to date, if not run
 
 ```bash
 echo "== Install dependencies"
-sudo apt-get update && sudo apt-get -y install build-essential clang cmake libfftw3-dev libusb-1.0-0-dev libcurl4-gnutls-dev ntp git tmux
+sudo apt-get update && sudo apt-get -y install build-essential clang cmake libfftw3-dev libusb-1.0-0-dev libcurl4-gnutls-dev git tmux
 
 echo "== Install rtl-sdr library (on RPi, don't use your distro package)"
 git clone https://github.com/rtlsdrblog/rtl-sdr-blog
@@ -31,6 +31,14 @@ sudo cp ../rtl-sdr.rules /etc/udev/rules.d/
 sudo ldconfig
 echo 'blacklist dvb_usb_rtl28xxu' | sudo tee --append /etc/modprobe.d/blacklist-dvb_usb_rtl28xxu.conf
 cd ../..
+
+# ntp seems not needed but we have to fix ntp stuffs anyhow, this applies to Raspberry Pi OS
+cd rtl-sdr-blog/
+sudo apt install systemd systemd-timesyncd
+sudo systemctl stop systemd-timesyncd
+sudo cp timesyncd.conf /etc/systemd/timesyncd.conf 
+sudo systemctl start systemd-timesyncd
+cd ..
 
 #git clone https://github.com/steve-m/librtlsdr
 #cd librtlsdr
