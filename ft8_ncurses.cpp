@@ -682,6 +682,7 @@ bool addToQSO(struct plain_message *qsoMsg) {
     return true;
 }
 
+/* 
 void printHeaders(void) {
     wattrset(trafficWH, A_NORMAL | A_BOLD);
     mvwprintw(trafficWH, 0, 0, "   Freq       SNR Msg\n");
@@ -696,6 +697,7 @@ void printHeaders(void) {
 
     wrefresh(cqW);
 }
+*/
 
 /*
 ** Focus on the chosen window **

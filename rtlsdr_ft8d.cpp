@@ -521,8 +521,8 @@ void printSpots(uint32_t n_results) {
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
         dr.freq = dec_results[i].freq + dec_options.freq;
-        dr.snr = dec_results[i].snr - 20;
-        dr.tempus = time(NULL);
+        dr.snr = dec_results[i].snr;
+        dr.tempus = dec_results[i].tempus;
         cq_queue.push_back(dr);
 
         pthread_mutex_unlock(&CQlock);   // Protect decodes structure
@@ -1038,7 +1038,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
 
                 decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-                decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].snr = (int32_t)cand->score -20;  // UPDATE: it's not true, score != snr
                 decodes[num_decoded].tempus = current_time;
 
                 pthread_mutex_unlock(&msglock);
@@ -1495,7 +1495,7 @@ int main(int argc, char **argv) {
     wclear(trafficW);
     wrefresh(trafficW);
     wattrset(trafficW, A_NORMAL);
-    printHeaders();
+    // printHeaders();
 
     /* Prepare a low priority param for the decoder thread */
     struct sched_param param;
