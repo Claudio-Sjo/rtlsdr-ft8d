@@ -93,8 +93,8 @@ pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.6.0";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.0";
+const char *rtlsdr_ft8d_version = "0.6.1";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.1";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -1039,6 +1039,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
                 decodes[num_decoded].snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].tempus = current_time;
 
                 pthread_mutex_unlock(&msglock);
 
