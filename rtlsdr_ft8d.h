@@ -52,6 +52,7 @@
  */
 #define FT8_PERIOD 15          // 15 seconds
 #define FT8_TXTIME 12600000    // 12.6 seconds in microseconds
+// #define FT8_TXTIME 13000000    // 12.6 seconds in microseconds
 #define FT8_BUFRESET 15000000  // 15 seconds in microseconds
 
 /* Possible PATIENCE options for FFTW:

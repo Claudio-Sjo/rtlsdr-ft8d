@@ -112,15 +112,15 @@ int init_ncurses(uint32_t initialFreq) {
 
     // WINDOW *subwin(n_raw, n_col, init_raw, init_col);
 
-    trafficW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
-    trafficW0 = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
-    trafficWLines = (LINES / 2) - 3;  // Lines for scroll need not to include the Header Line
+    cqW  = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
+    cqW0  = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
 
     statusW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 5, 4, (COLS / 2) + 2);
     statusW0 = subwin(stdscr, LINES / 2, COLS / 2 - 3, 2, (COLS / 2) + 1);
 
-    cqW0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
-    cqW = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
+    trafficW0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
+    trafficW = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
+    trafficWLines = (LINES / 2) - 8;  // Lines for scroll need not to include the Header Line
 
     qso0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2), (LINES / 2) + 2, 1);
     qso = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 3, (LINES / 2) + 3, 3);
