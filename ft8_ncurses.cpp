@@ -56,7 +56,7 @@ int activeWin = CQWIN;
 char txString[MAXTXSTRING];
 char editString[MAXTXSTRING];
 
-struct decoder_results cqReq[MAXCQ];
+// struct decoder_results cqReq[MAXCQ];
 struct plain_message qsoReq[MAXCQ];
 int cqFirst, cqLast, cqIdx;
 int qsoFirst, qsoLast, qsoIdx;
@@ -112,8 +112,8 @@ int init_ncurses(uint32_t initialFreq) {
 
     // WINDOW *subwin(n_raw, n_col, init_raw, init_col);
 
-    cqW  = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
-    cqW0  = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
+    cqW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
+    cqW0 = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
 
     statusW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 5, 4, (COLS / 2) + 2);
     statusW0 = subwin(stdscr, LINES / 2, COLS / 2 - 3, 2, (COLS / 2) + 1);
@@ -176,8 +176,8 @@ int init_ncurses(uint32_t initialFreq) {
     scrollok(trafficW, true);
     idlok(trafficW, true);
 
-    scrollok(trafficW, true);
-    idlok(trafficW, true);
+    scrollok(cqW, true);
+    idlok(cqW, true);
 
     scrollok(qso, true);
     idlok(qso, true);
@@ -200,11 +200,6 @@ int init_ncurses(uint32_t initialFreq) {
     wrefresh(cqW0);
 
     refresh();
-
-    /* Initiate the call's database */
-    for (uint32_t i; i < MAXCQ; i++) {
-        sprintf(cqReq[i].call, "NONE");
-    }
 
     sprintf(txString, "");
     sprintf(editString, "");
@@ -428,14 +423,14 @@ void *KBDHandler(void *vargp) {
                             disableAutoQSO();
 
                         if (!strcmp(editString, "QUIT"))
-                            programQuit();                            
+                            programQuit();
 
-                        sprintf(editString,"");
-/*
-                        pthread_mutex_lock(&TXlock);  // Protect key queue structure
-                        tx_queue.push_back(Txletter);
-                        pthread_mutex_unlock(&TXlock);  // Protect key queue structure
-                        */
+                        sprintf(editString, "");
+                        /*
+                                                pthread_mutex_lock(&TXlock);  // Protect key queue structure
+                                                tx_queue.push_back(Txletter);
+                                                pthread_mutex_unlock(&TXlock);  // Protect key queue structure
+                                                */
                         break;
                     case DEL:
                         if (ix)
@@ -489,65 +484,27 @@ void *KBDHandler(void *vargp) {
     }
 }
 
-void printCQ(bool refresh) {
-    if (!refresh)
-        return;
-
+void printCQ(struct decoder_results *cqReq) {
     // Print on the Log Window
     /* Reset the cursor position */
+    char timeString[10];
 
-    if (cqFirst != cqLast) {
-        wmove(cqW, 0, 0);
-        wrefresh(cqW);
+    wattrset(cqW, A_NORMAL);
 
-        wattrset(cqW, A_NORMAL | A_BOLD);
+    /* convert to localtime */
+    struct tm *local = localtime(&cqReq->tempus);
 
-        wprintw(cqW, "    Incoming CQ Requests\n");
+    /* and set the string */
+    sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-        wattrset(cqW, A_NORMAL);
+    wprintw(cqW, " %8dHz %.6s DE  %13s %2ddB\n",
+            cqReq->freq,
+            cqReq->cmd,
+            cqReq->call,
+            cqReq->snr - 20);
 
-        if (cqLast > cqFirst) {
-            for (int i = cqFirst; i < cqLast; i++) {
-                /*
-            if (i == cqIdx) {
-
-                if (activeWin == CQWIN)
-                    wattrset(cqW, COLOR_PAIR(12) | A_BOLD);
-                else
-                    wattrset(cqW, COLOR_PAIR(2) | A_BOLD);
-            } else
-                                */
-
-                wprintw(cqW, " %.6s DE  %13s freq. %8dHz %2ddB\n",
-                        cqReq[i].cmd,
-                        cqReq[i].call,
-                        cqReq[i].freq,
-                        cqReq[i].snr);
-            }
-        } else {
-            int idx = cqFirst;
-            for (int i = 0; i < trafficWLines; i++) {
-                /*
-                if (i == cqIdx) {
-                if (activeWin == CQWIN)
-                    wattrset(cqW, COLOR_PAIR(12) | A_BOLD);
-                else
-                    wattrset(cqW, COLOR_PAIR(2) | A_BOLD);
-                } else
-                wattrset(cqW, A_NORMAL);
-                */
-                wprintw(cqW, " %.6s DE  %13s freq. %8dHz %2ddB\n",
-                        cqReq[(i + cqFirst) % trafficWLines].cmd,
-                        cqReq[(i + cqFirst) % trafficWLines].call,
-                        cqReq[(i + cqFirst) % trafficWLines].freq,
-                        cqReq[(i + cqFirst) % trafficWLines].snr);
-
-                idx = (idx + 1) % trafficWLines;
-            }
-        }
-        wattrset(cqW, A_NORMAL);
-        wrefresh(cqW);
-    }
+    wrefresh(cqW);
+    wattrset(cqW, A_NORMAL);
 }
 
 // Print on the QSO window
@@ -701,27 +658,6 @@ void printLog(plain_message *logMsg) {
     wattrset(trafficW, A_NORMAL);
 }
 
-/* A new CQ request has been received, let's add it to the table */
-bool addToCQ(struct decoder_results *dr) {
-    /* Is the caller already in the table? */
-    for (uint32_t i = 0; i < trafficWLines; i++)
-        if (strcmp(dr->call, cqReq[i].call) == 0) {
-            cqReq[i].tempus = dr->tempus;
-            return false;  // Found! we don't add anything
-        }
-
-    cqReq[cqLast].freq = dr->freq;
-    cqReq[cqLast].snr = dr->snr;
-    strcpy(cqReq[cqLast].cmd, dr->cmd);
-    strcpy(cqReq[cqLast].call, dr->call);
-    cqReq[cqLast].tempus = dr->tempus;
-
-    cqLast = (cqLast + 1) % trafficWLines;
-    if (cqLast == cqFirst)
-        cqFirst = (cqFirst + 1) % trafficWLines;
-
-    return true;
-}
 
 bool addToQSO(struct plain_message *qsoMsg) {
     for (uint32_t i = 0; i < qsoWLines; i++)
@@ -825,7 +761,7 @@ void *CQHandler(void *vargp) {
             cq_queue.erase(cq_queue.begin());
             pthread_mutex_unlock(&CQlock);
 
-            printCQ(addToCQ(&dr));
+            printCQ(&dr);
         }
         if (kbd_queue.size()) {
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
@@ -858,7 +794,7 @@ void *CQHandler(void *vargp) {
             dynamicRefresh = 0;
         }
 
-        printCQ(termRefresh);
+        // printCQ(termRefresh);
         printQSO(termRefresh);
         printCall(termRefresh);
         refreshStatus(termRefresh);
