@@ -497,11 +497,12 @@ void printCQ(struct decoder_results *cqReq) {
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-    wprintw(cqW, " %8dHz %.6s DE  %13s %2ddB\n",
+    wprintw(cqW, "%s %8dHz %.6s DE  %13s %2ddB\n",
+            timeString,
             cqReq->freq,
             cqReq->cmd,
             cqReq->call,
-            cqReq->snr - 20);
+            cqReq->snr); // -20dB already computed
 
     wrefresh(cqW);
     wattrset(cqW, A_NORMAL);
@@ -658,7 +659,6 @@ void printLog(plain_message *logMsg) {
     wattrset(trafficW, A_NORMAL);
 }
 
-
 bool addToQSO(struct plain_message *qsoMsg) {
     for (uint32_t i = 0; i < qsoWLines; i++)
         if (strcmp(qsoMsg->src, qsoReq[i].src) == 0) {
@@ -682,7 +682,7 @@ bool addToQSO(struct plain_message *qsoMsg) {
     return true;
 }
 
-/* 
+/*
 void printHeaders(void) {
     wattrset(trafficWH, A_NORMAL | A_BOLD);
     mvwprintw(trafficWH, 0, 0, "   Freq       SNR Msg\n");
