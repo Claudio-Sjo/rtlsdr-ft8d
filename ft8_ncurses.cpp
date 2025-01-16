@@ -351,12 +351,12 @@ void refreshStatus(bool refresh) {
     mvwprintw(statusW, 0, 3, " PSK Report : %s", getReportingStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 1, 3, " Auto Reply : %s", getAutoCQReplyStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 2, 3, " Self CQ    : %s", getAutoCQStatus() ? "ON " : "OFF");
-    mvwprintw(statusW, 3, 3, " Self QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
+    mvwprintw(statusW, 3, 3, " Auto QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
 
     mvwprintw(statusW, 5, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
 
     mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, AUTOCQ ON/OFF");
-    mvwprintw(statusW, 9, 3, "          SELFCQ ON/OFF, SELFQSO ON/OFF");
+    mvwprintw(statusW, 9, 3, "          AUTOREPLY ON/OFF, AUTOQSO ON/OFF");
 
     wrefresh(statusW);
 }
@@ -412,14 +412,14 @@ void *KBDHandler(void *vargp) {
                         if (!strcmp(editString, "PSK OFF"))
                             disableReporting();
 
-                        if (!strcmp(editString, "SELFCQ ON"))
+                        if (!strcmp(editString, "AUTOREPLY ON"))
                             enableAutoCQReply();
-                        if (!strcmp(editString, "SELFCQ OFF"))
+                        if (!strcmp(editString, "AUTOREPLY OFF"))
                             disableAutoCQReply();
 
-                        if (!strcmp(editString, "SELFQSO ON"))
+                        if (!strcmp(editString, "AUTOQSO ON"))
                             enableAutoQSO();
-                        if (!strcmp(editString, "SELFQSO OFF"))
+                        if (!strcmp(editString, "AUTOQSO OFF"))
                             disableAutoQSO();
 
                         if (!strcmp(editString, "QUIT"))
@@ -502,72 +502,51 @@ void printCQ(struct decoder_results *cqReq) {
             cqReq->freq,
             cqReq->cmd,
             cqReq->call,
-            cqReq->snr); // -20dB already computed
+            cqReq->snr);  // -20dB already computed
 
     wrefresh(cqW);
     wattrset(cqW, A_NORMAL);
 }
 
-// Print on the QSO window
-void printQSO(bool refresh) {
-    if (!refresh)
-        return;
+void printQSORemote(plain_message *logMsg) {
+    char timeString[10];
 
-    if (qsoFirst != qsoLast) {
-        wmove(qso, 0, 0);
-        wrefresh(qso);
-        wattrset(qso, A_NORMAL);
+    wattrset(qso, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
-        if (qsoLast > qsoFirst) {
-            for (int i = qsoFirst; i < qsoLast; i++) {
-                /*
-                if (i == qsoIdx) {
-                    if (activeWin == QSOWIN)
-                        wattrset(qso, COLOR_PAIR(12) | A_BOLD);
-                    else
-                        wattrset(qso, COLOR_PAIR(2) | A_BOLD);
-                } else
-                    wattrset(qso, A_NORMAL);
-*/
-                char timeString[10];
+    /* convert to localtime */
+    struct tm *local = localtime(&logMsg->tempus);
 
-                /* convert to localtime */
-                struct tm *local = localtime(&qsoReq[i].tempus);
+    /* and set the string */
+    sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-                /* and set the string */
-                sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+    wprintw(qso, "%s %dHz  %3ddB %s %s %s\n",
+            timeString,
+            logMsg->freq,
+            logMsg->snr - 20,
+            logMsg->dest,
+            logMsg->src,
+            logMsg->message);
 
-                wprintw(qso, " %s %dHz  %ddB %s %s\n",
-                        timeString,
-                        qsoReq[i].freq,
-                        qsoReq[i].snr - 20,
-                        qsoReq[i].src,
-                        qsoReq[i].message);
-            }
-        } else {
-            int idx = qsoFirst;
-            for (int i = 0; i < qsoWLines; i++) {
-                /*
-                if (i == qsoIdx) {
-                    if (activeWin == QSOWIN)
-                        wattrset(qso, COLOR_PAIR(12) | A_BOLD);
-                    else
-                        wattrset(qso, COLOR_PAIR(2) | A_BOLD);
-                } else
-                    wattrset(qso, A_NORMAL);
-*/
-                wprintw(qso, " %dHz  %ddB %s %s\n",
-                        qsoReq[i].freq,
-                        qsoReq[i].snr - 20,
-                        qsoReq[i].src,
-                        qsoReq[i].message);
+    wrefresh(qso);
+    wattrset(qso, A_NORMAL);
+}
 
-                idx = (idx + 1) % qsoWLines;
-            }
-        }
-        wattrset(qso, A_NORMAL);
-        wrefresh(qso);
-    }
+void displayTxString(char *txMessage) {
+    char timeString[10];
+
+    time_t rawtime;
+    time(&rawtime);
+    struct tm *local = gmtime(&rawtime);
+
+    /* and set the string */
+    sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+
+    wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // Local messages are RED
+
+    wprintw(qso, "%s, %s\n", timeString, txMessage);
+
+    wrefresh(qso);
+    wattrset(qso, A_NORMAL);
 }
 
 /* Update the Clock */
@@ -580,54 +559,6 @@ void printClock(void) {
 
     mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
     wrefresh(header);
-}
-// Print on the Call window
-void printCall(bool refresh) {
-    if (!refresh)
-        return;
-
-    /*
-        if (activeWin == CQWIN)
-            sprintf(txString, "%s %s %s ", cqReq[(cqIdx + cqFirst) % trafficWLines].call, dec_options.rcall, dec_options.rloc);
-        if (activeWin == QSOWIN)
-            sprintf(txString, "%s %s", qsoReq[(qsoIdx + qsoFirst) % qsoWLines].dest, dec_options.rcall);
-        if (activeWin == TXWIN)
-            sprintf(txString, "");
-    */
-
-    wmove(call, 0, 0);  // Y,X
-    werase(call);
-    wattrset(call, COLOR_PAIR(1) | A_BOLD);
-    waddstr(call, txString);
-    wattrset(call, COLOR_PAIR(3) | A_BOLD);
-    waddstr(call, editString);
-
-    switch (txStatusFlag) {
-        case TX_IDLE:
-
-            break;
-        case TX_WAITING:
-            wmove(call, 0, COLS / 2);  // Y,X
-            wattrset(call, COLOR_PAIR(2) | A_BOLD);
-            waddstr(call, txString);
-            waddstr(call, editString);
-            break;
-        case TX_ONGOING:
-            wmove(call, 0, COLS / 2);  // Y,X
-            wattrset(call, COLOR_PAIR(3) | A_BOLD);
-            waddstr(call, txString);
-            waddstr(call, editString);
-            break;
-        case TX_END:
-            wmove(call, 0, COLS / 2);  // Y,X
-            wattrset(call, A_NORMAL);
-            waddstr(call, txString);
-            waddstr(call, editString);
-            break;
-    }
-
-    wrefresh(call);
-    wattrset(call, A_NORMAL);
 }
 
 void printLog(plain_message *logMsg) {
@@ -659,81 +590,20 @@ void printLog(plain_message *logMsg) {
     wattrset(trafficW, A_NORMAL);
 }
 
-bool addToQSO(struct plain_message *qsoMsg) {
-    for (uint32_t i = 0; i < qsoWLines; i++)
-        if (strcmp(qsoMsg->src, qsoReq[i].src) == 0) {
-            // Found! we should add the message actually!!
-            strncat(qsoReq[i].message, " ", sizeof(qsoReq[i].message));
-            strncat(qsoReq[i].message, qsoMsg->message, sizeof(qsoReq[i].message));
-            return false;
-        }
+// Print on the Call window
+void printCall(bool refresh) {
+    if (!refresh)
+        return;
 
-    // Not found! we create the entry in the table
-    qsoReq[qsoLast].freq = qsoMsg->freq;
-    qsoReq[qsoLast].snr = qsoMsg->snr;
-    strcpy(qsoReq[qsoLast].message, qsoMsg->message);
-    strcpy(qsoReq[qsoLast].src, qsoMsg->src);
-    qsoReq[qsoLast].tempus = qsoMsg->tempus;
+    wmove(call, 0, 0);  // Y,X
+    werase(call);
+    wattrset(call, COLOR_PAIR(1) | A_BOLD);
+    waddstr(call, "CMD>");
+    waddstr(call, editString);
 
-    qsoLast = (qsoLast + 1) % qsoWLines;
-    if (qsoLast == qsoFirst)
-        qsoFirst = (qsoFirst + 1) % qsoWLines;
-
-    return true;
+    wrefresh(call);
+    wattrset(call, A_NORMAL);
 }
-
-/*
-void printHeaders(void) {
-    wattrset(trafficWH, A_NORMAL | A_BOLD);
-    mvwprintw(trafficWH, 0, 0, "   Freq       SNR Msg\n");
-    wattrset(trafficWH, A_NORMAL);
-
-    wrefresh(trafficWH);
-
-    wattrset(cqW, A_NORMAL | A_BOLD);
-
-    wprintw(cqW, "    Incoming CQ Requests\n");
-    wattrset(cqW, A_NORMAL);
-
-    wrefresh(cqW);
-}
-*/
-
-/*
-** Focus on the chosen window **
-void focusOnWin(int whatWin) {
-    return;
-    switch (whatWin) {
-        case CQWIN:
-            box(cqW0, 0, 0);
-            mvwprintw(cqW0, 0, 10, " CQ Reply Mode ");
-            wrefresh(cqW0);
-            box(qso0, 0, 0);
-            wrefresh(qso0);
-            box(call0, 0, 0);
-            wrefresh(call0);
-            break;
-        case QSOWIN:
-            box(qso0, 0, 0);
-            mvwprintw(qso0, 0, 10, " QSO Reply Mode ");
-            wrefresh(qso0);
-            box(cqW0, 0, 0);
-            wrefresh(cqW0);
-            box(call0, 0, 0);
-            wrefresh(call0);
-            break;
-        case TXWIN:
-            box(call0, 0, 0);
-            mvwprintw(call0, 0, 10, " TX Freetext Mode ");
-            wrefresh(call0);
-            box(qso0, 0, 0);
-            wrefresh(qso0);
-            box(cqW0, 0, 0);
-            wrefresh(cqW0);
-            break;
-    }
-}
-*/
 
 #define FORCEREFRESH 100  // in 10th of msec
 
@@ -784,7 +654,7 @@ void *CQHandler(void *vargp) {
             qso_queue.erase(qso_queue.begin());
             pthread_mutex_unlock(&QSOlock);
 
-            printQSO(addToQSO(&qsoMsg));
+            printQSORemote(&qsoMsg);
         }
         /* if needed update the screen */
         if (termRefresh)
@@ -796,8 +666,6 @@ void *CQHandler(void *vargp) {
             dynamicRefresh = 0;
         }
 
-        // printCQ(termRefresh);
-        printQSO(termRefresh);
         printCall(termRefresh);
         refreshStatus(termRefresh);
         if (termRefresh)
@@ -811,8 +679,4 @@ void *CQHandler(void *vargp) {
 
         usleep(10000); /* Wait 10 msec.*/
     }
-}
-
-void displayTxString(char *txMsg) {
-    sprintf(txString, "%s", txMsg);
 }
