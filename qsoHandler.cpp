@@ -57,7 +57,7 @@ extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
 /* When testing define the symbol TESTQSO */
-#define TESTQSO
+// #define TESTQSO
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
@@ -364,6 +364,8 @@ void testCaseExec(ft8slot_t theSlot) {
         pthread_mutex_lock(&QSOlock);  // Protect decodes structure
         qso_queue.push_back(testQSO);
         pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+
+        usleep(500000); /* Wait 500 msec.*/
 
         testResult = addQso(&testQSO);
         if (testResult == true)
