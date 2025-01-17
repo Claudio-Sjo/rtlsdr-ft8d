@@ -113,13 +113,13 @@ void logToAdi(struct plain_message *completedQSO) {
     char buff[32];
 
     adiFile = fopen(adiFileName, "a");
-    fprintf(adiFile, "<CALL:%d>%s", strlen(completedQSO->src), completedQSO->src);  // CallId
+    fprintf(adiFile, "<CALL:%zu>%s", strlen(completedQSO->src), completedQSO->src);  // CallId
     timeinfo = localtime(&completedQSO->tempus);
     fprintf(adiFile, "<TIME_ON:6>%02d%02d%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);                 // Time
     fprintf(adiFile, "<QSO_DATE_OFF:8>%d%02d%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);  // Date
 
     sprintf(buff, "%d.%06d", completedQSO->freq / 1000000, completedQSO->freq % 1000000);
-    fprintf(adiFile, "<FREQ_RX:%d>%s", strlen(buff), buff);                                      // Rx frequency
+    fprintf(adiFile, "<FREQ_RX:%zu>%s", strlen(buff), buff);                                     // Rx frequency
     fprintf(adiFile, "<BAND:3>20M<BAND_RX:3>20M<MODE:3>FT8");                                    // Data
     fprintf(adiFile, "<MY_GRIDSQUARE:6>%s<OPERATOR:6>%s", dec_options.rloc, dec_options.rcall);  // Data
     fprintf(adiFile, "\n<EOR>\n\n");                                                             // End of Record
@@ -215,49 +215,65 @@ void queueTx(char *txString) {
     pthread_mutex_unlock(&TXlock);  // Protect key queue structure
 }
 
+/* This function handles the Tx task of the state machine
+    It returns true if there are transmissions scheduled
+*/
 bool handleTx(ft8slot_t txSlot) {
     if (qsoState == idle)
         return false;
     else {
-        if (txBusy == false) {
-            /* If we are in the same slot than the QSO, we will queue the reply */
-            if (currentQSO.ft8slot == txSlot) {
-                char theMessage[255];
-                char theLevel[255];
-                switch (qsoState) {
-                    case replyLoc:
-                        // Reply FT8Tx FREQ DEST SRC LOC
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
-                        break;
-                    case replySig:
-                        // Reply FT8Tx FREQ DEST SRC LEVEL
-                        if (currentQSO.snr >= 0)
-                            sprintf(theLevel, "+%02d", currentQSO.snr);
-                        else
-                            sprintf(theLevel, "%03d", currentQSO.snr);
-                        sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
-                        break;
-                    case replyRR73:
-                        sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.src, dec_options.rcall);
-                        // Reply DEST SRC RR73
-                        break;
-                    case reply73:
-                        // Reply DEST SRC 73
-                        sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.src, dec_options.rcall);
-                        qsoState = idle;
-                        break;
-                    default:
-                        qsoState = idle;  // It should NEVER happen
-                        break;
-                }
-                LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
+        /* If we are in the same slot than the QSO, we will queue the reply */
+        if (currentQSO.ft8slot == txSlot) {
+            char theMessage[255];
+            char theLevel[255];
+            switch (qsoState) {
+                case replyLoc:
+                    // Reply FT8Tx FREQ DEST SRC LOC
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
+                    queueTx(theMessage);
+                    displayTxString(theMessage);
+                    LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
+                    break;
+                case replySig:
+                    // Reply FT8Tx FREQ DEST SRC LEVEL
+                    if (currentQSO.snr >= 0)
+                        sprintf(theLevel, "+%02d", currentQSO.snr);
+                    else
+                        sprintf(theLevel, "%03d", currentQSO.snr);
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
+                    queueTx(theMessage);
+                    displayTxString(theMessage);
+                    LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
-                queueTx(theMessage);
-                displayTxString(theMessage);
+                    break;
+                case replyRR73:
+                    sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.src, dec_options.rcall);
+                    // Reply DEST SRC RR73
+                    queueTx(theMessage);
+                    displayTxString(theMessage);
+                    LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
+
+                    break;
+                case reply73:
+                    // Reply DEST SRC 73
+                    sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.src, dec_options.rcall);
+                    qsoState = idle;
+                    queueTx(theMessage);
+                    displayTxString(theMessage);
+                    LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
+
+                    break;
+                default:
+                    qsoState = idle;  // It should NEVER happen
+                    LOG(LOG_DEBUG, "handleTx called wrongly\n");
+
+                    break;
             }
-        }  // Txbusy = false
-        return false;
+        }
+        if (qsoState == idle)
+            return false;
     }
+    return true;
 }
 
 bool queryCQ(void) {
@@ -367,22 +383,24 @@ bool updateQsoMachine(ft8slot_t theSlot) {
     testCaseExec(theSlot);
 #endif
 
-    /* Complete the Tx session */
-    txBusy = handleTx(theSlot);
-
-    if (qsoState == idle) return queryCQ();
-
-    /* Check if QSO in timeout, if so close it and return true */
+    /* Check if QSO in timeout, if so close it */
     if (ft8tick >= ft8time) {
         /* Check if the QSO can be considered closed, if so log the record */
         if ((qsoState != replyLoc) && (qsoState != replySig)) {
             /* This QSO shall be logged */
-            /* TBD */
+            logToAdi(&currentQSO);
         }
         resetQsoState();
-        return true;
+        txBusy = false;
+    } else {
+        /* Complete the Tx session */
+        txBusy = handleTx(theSlot);
     }
-    return false;
+
+    if (!txBusy)
+        return queryCQ();
+    else
+        return false;
 }
 
 /* State Machine Description */
@@ -430,7 +448,7 @@ Tmo   |  Any       | Idle       | Ignore
 peermsg_t parseMsg(char *msg) {
     char *ptr = msg;
 
-    LOG(LOG_DEBUG, "parseMsg received %s, length %d --- ", msg, strlen(msg));
+    LOG(LOG_DEBUG, "parseMsg received %s, length %zu --- ", msg, strlen(msg));
 
     if (isdigit(*ptr)) {
         if (atoi(msg) == 73) {
