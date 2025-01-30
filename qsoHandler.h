@@ -62,3 +62,5 @@ bool getAutoCQReplyStatus(void);
 void enableAutoQSO(void);
 void disableAutoQSO(void);
 bool getAutoQSOStatus(void);
+void setActiveSlot(ft8slot_t value);
+ft8slot_t getActiveSlot(void);

@@ -53,6 +53,8 @@ extern pthread_mutex_t LOGlock;
 extern struct decoder_options dec_options;
 extern struct receiver_options rx_options;
 
+extern ft8slot_t thisSlot;
+
 extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
 
@@ -76,6 +78,8 @@ static uint32_t peersIdx = 0;
 static bool autoCq = false;
 static bool autoCqReply = false;
 static bool autoQSO = false;
+
+static ft8slot_t activeSlot = even;
 
 const char *qsoDir = "/ft8QSOdir/";
 char adiFileName[255];
@@ -276,11 +280,16 @@ bool handleTx(ft8slot_t txSlot) {
     return true;
 }
 
-bool queryCQ(void) {
+bool queryCQ(ft8slot_t theSlot) {
 #ifdef TESTQSO
     return false;
 #endif
     if (!autoCq)
+        return false;
+
+/* Only works at the active slot */
+
+    if (theSlot != activeSlot)
         return false;
 
     char cqMessage[255];
@@ -404,7 +413,7 @@ bool updateQsoMachine(ft8slot_t theSlot) {
     }
 
     if (!txBusy)
-        return queryCQ();
+        return queryCQ(theSlot);
     else
         return false;
 }
@@ -493,6 +502,11 @@ peermsg_t parseMsg(char *msg) {
 bool addQso(struct plain_message *newQso) {
     if (!autoQSO)
         return false;
+
+    /* Only accept signals in the active slot */
+    if (newQso->ft8slot != activeSlot)
+        return false;
+
     /* We accept new QSO if we are Idle */
     if (qsoState == idle) {
         /* If we had already a QSO with that peer we reject the QSO */
@@ -582,6 +596,9 @@ bool addCQ(struct plain_message *newQso) {
     if (qsoState != idle)
         return false;
 
+    if (newQso->ft8slot != activeSlot)
+        return false;
+
     /* If we had already a QSO with that peer we reject the QSO */
     if (checkPeer(newQso->src))
         return false;
@@ -636,4 +653,14 @@ void disableAutoQSO(void) {
 
 bool getAutoQSOStatus(void) {
     return (autoQSO == true);
+}
+
+void setActiveSlot(ft8slot_t value)
+{
+    activeSlot = value;
+}
+
+ft8slot_t getActiveSlot(void)
+{
+    return activeSlot;
 }

@@ -65,6 +65,7 @@ int trafficWLines;
 int qsoWLines;
 uint32_t qsoFreq;
 uint32_t reportedCQ;
+ft8slot_t thisSlot;
 
 bool transmitting = false;
 
@@ -352,10 +353,11 @@ void refreshStatus(bool refresh) {
     mvwprintw(statusW, 1, 3, " Auto Reply : %s", getAutoCQReplyStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 2, 3, " Self CQ    : %s", getAutoCQStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 3, 3, " Auto QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
+    mvwprintw(statusW, 3, 3, " Active Slot: %s", (getActiveSlot() == odd) ? "ODD " : "EVEN");
 
-    mvwprintw(statusW, 5, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
+    mvwprintw(statusW, 6, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
 
-    mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, AUTOCQ ON/OFF");
+    mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, SLOT ODD/EVEN, AUTOCQ ON/OFF");
     mvwprintw(statusW, 9, 3, "          AUTOREPLY ON/OFF, AUTOQSO ON/OFF");
 
     wrefresh(statusW);
@@ -421,6 +423,12 @@ void *KBDHandler(void *vargp) {
                             enableAutoQSO();
                         if (!strcmp(editString, "AUTOQSO OFF"))
                             disableAutoQSO();
+
+                        if (!strcmp(editString, "SLOT ODD"))
+                            setActiveSlot(odd);
+
+                        if (!strcmp(editString, "SLOT EVEN"))
+                            setActiveSlot(even);
 
                         if (!strcmp(editString, "QUIT"))
                             programQuit();
@@ -493,16 +501,18 @@ void printCQ(struct decoder_results *cqReq) {
 
     /* convert to localtime */
     struct tm *local = localtime(&cqReq->tempus);
+    ft8slot_t thisSlot = ((cqReq->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-    wprintw(cqW, "%s %8dHz %.6s DE  %13s %2ddB\n",
+    wprintw(cqW, "%s %8dHz %.6s DE  %13s %2ddB %s\n",
             timeString,
             cqReq->freq,
             cqReq->cmd,
             cqReq->call,
-            cqReq->snr);  // -20dB already computed
+            cqReq->snr,
+            (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
 
     wrefresh(cqW);
     wattrset(cqW, A_NORMAL);
@@ -515,17 +525,19 @@ void printQSORemote(plain_message *logMsg) {
 
     /* convert to localtime */
     struct tm *local = localtime(&logMsg->tempus);
+    ft8slot_t thisSlot = ((logMsg->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-    wprintw(qso, "%s %dHz  %3ddB %s %s %s\n",
+    wprintw(qso, "%s %dHz  %3ddB %s %s %s %s\n",
             timeString,
             logMsg->freq,
             logMsg->snr - 20,
             logMsg->dest,
             logMsg->src,
-            logMsg->message);
+            logMsg->message,
+            (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
 
     wrefresh(qso);
     wattrset(qso, A_NORMAL);
@@ -552,12 +564,19 @@ void displayTxString(char *txMessage) {
 /* Update the Clock */
 void printClock(void) {
     /* We need the time of the day */
-    time_t currentTime = time(NULL);
-    struct tm tm = *localtime(&currentTime);
+    struct timeval lTime;
+    gettimeofday(&lTime, NULL);
+
+    thisSlot = ((lTime.tv_sec / FT8_PERIOD) & 0x01) ? odd : even;
+
+    // time_t current_time = time(NULL);
+    time_t current_time = lTime.tv_sec;
+    struct tm tm = *localtime(&current_time);
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
 
-    mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    mvwprintw(header, 0, COLS - 21, "%d-%02d-%02d %02d:%02d:%02d %s", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+              tm.tm_hour, tm.tm_min, tm.tm_sec, (thisSlot == odd) ? "O" : "E");
     wrefresh(header);
 }
 
@@ -574,17 +593,19 @@ void printLog(plain_message *logMsg) {
 
     /* convert to localtime */
     struct tm *local = localtime(&logMsg->tempus);
+    ft8slot_t thisSlot = ((logMsg->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
 
-    wprintw(trafficW, "%s %dHz  %3ddB %s %s %s\n",
+    wprintw(trafficW, "%s %dHz  %3ddB %s %s %s %s\n",
             timeString,
             logMsg->freq,
             logMsg->snr - 20,
             logMsg->dest,
             logMsg->src,
-            logMsg->message);
+            logMsg->message,
+            (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
 
     wrefresh(trafficW);
     wattrset(trafficW, A_NORMAL);
@@ -605,8 +626,6 @@ void printCall(bool refresh) {
     wattrset(call, A_NORMAL);
 }
 
-#define FORCEREFRESH 100  // in 10th of msec
-
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
     static bool termRefresh = false;
@@ -626,6 +645,7 @@ void *CQHandler(void *vargp) {
             pthread_mutex_unlock(&LOGlock);
 
             printLog(&logMsg);
+            termRefresh = true;
         }
         if (cq_queue.size()) {
             pthread_mutex_lock(&CQlock);
@@ -634,6 +654,7 @@ void *CQHandler(void *vargp) {
             pthread_mutex_unlock(&CQlock);
 
             printCQ(&dr);
+            termRefresh = true;
         }
         if (kbd_queue.size()) {
             pthread_mutex_lock(&KBDlock);  // Protect key queue structure
@@ -655,25 +676,22 @@ void *CQHandler(void *vargp) {
             pthread_mutex_unlock(&QSOlock);
 
             printQSORemote(&qsoMsg);
-        }
-        /* if needed update the screen */
-        if (termRefresh)
-            dynamicRefresh = 0;
-        else
-            dynamicRefresh++;
-        if (dynamicRefresh > FORCEREFRESH) {
             termRefresh = true;
-            dynamicRefresh = 0;
         }
 
         printCall(termRefresh);
         refreshStatus(termRefresh);
-        if (termRefresh)
-            refresh();
+
         if (clockRefresh-- == 0) {
             printClock();
             clockRefresh = 20;
+            wrefresh(stdscr);
             refresh();
+        } else {
+            if (termRefresh) {
+                wrefresh(stdscr);
+                refresh();
+            }
         }
         termRefresh = false;
 
