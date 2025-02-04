@@ -81,6 +81,26 @@ bool getTransmitting(void) {
     return (transmitting == true);
 }
 
+
+void refreshBoxes(void)
+{
+    box(trafficW0, 0, 0);
+    mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
+    wrefresh(trafficW0);
+
+    box(statusW0, 0, 0);
+    mvwprintw(statusW0, 0, 10, " Transceiver Status ");
+    wrefresh(statusW0);
+
+    box(qso0, 0, 0);
+    mvwprintw(qso0, 0, 10, " Ongoing QSO ");
+    wrefresh(qso0);
+
+    box(cqW0, 0, 0);
+    mvwprintw(cqW0, 0, 10, " Incoming CQ ");
+    wrefresh(cqW0);
+}
+
 int init_ncurses(uint32_t initialFreq) {
     /*
         Initialize the working values from the main program
@@ -119,12 +139,12 @@ int init_ncurses(uint32_t initialFreq) {
     statusW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 5, 4, (COLS / 2) + 2);
     statusW0 = subwin(stdscr, LINES / 2, COLS / 2 - 3, 2, (COLS / 2) + 1);
 
-    trafficW0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
-    trafficW = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
+    trafficW0 = subwin(stdscr, (LINES / 2) - 6, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
+    trafficW = subwin(stdscr, (LINES / 2) - 8, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
     trafficWLines = (LINES / 2) - 8;  // Lines for scroll need not to include the Header Line
 
-    qso0 = subwin(stdscr, (LINES / 2) - 5, (COLS / 2), (LINES / 2) + 2, 1);
-    qso = subwin(stdscr, (LINES / 2) - 7, (COLS / 2) - 3, (LINES / 2) + 3, 3);
+    qso0 = subwin(stdscr, (LINES / 2) - 6, (COLS / 2), (LINES / 2) + 2, 1);
+    qso = subwin(stdscr, (LINES / 2) - 8, (COLS / 2) - 3, (LINES / 2) + 3, 3);
     qsoWLines = getmaxy(qso);
 
     call0 = subwin(stdscr, 3, COLS - 2, LINES - 4, 1);
@@ -163,7 +183,7 @@ int init_ncurses(uint32_t initialFreq) {
     /* Print the header */
     mvwprintw(header, 0, 1, "%s - %s  %dHz\n", dec_options.rcall, dec_options.rloc, qsoFreq);
 
-    mvwprintw(header, 0, COLS / 2 - 10, "rtlsdr FT8 %s - QSO Mode\n", rtlsdr_ft8d_version);
+    mvwprintw(header, 0, COLS / 2 - 12, "rtlsdr FT8 %s - QSO Mode\n", rtlsdr_ft8d_version);
 
     //   mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
@@ -353,7 +373,7 @@ void refreshStatus(bool refresh) {
     mvwprintw(statusW, 1, 3, " Auto Reply : %s", getAutoCQReplyStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 2, 3, " Self CQ    : %s", getAutoCQStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 3, 3, " Auto QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
-    mvwprintw(statusW, 3, 3, " Active Slot: %s", (getActiveSlot() == odd) ? "ODD " : "EVEN");
+    mvwprintw(statusW, 4, 3, " Active Slot: %s", (getActiveSlot() == odd) ? "ODD " : "EVEN");
 
     mvwprintw(statusW, 6, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
 
@@ -575,7 +595,7 @@ void printClock(void) {
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
 
-    mvwprintw(header, 0, COLS - 21, "%d-%02d-%02d %02d:%02d:%02d %s", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+    mvwprintw(header, 0, COLS - 24, "%d-%02d-%02d %02d:%02d:%02d %s", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
               tm.tm_hour, tm.tm_min, tm.tm_sec, (thisSlot == odd) ? "O" : "E");
     wrefresh(header);
 }
@@ -628,7 +648,7 @@ void printCall(bool refresh) {
 
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
-    static bool termRefresh = false;
+    static bool termRefresh = true;
     int dynamicRefresh = 0;
     uint32_t clockRefresh = 60;
 
@@ -686,10 +706,12 @@ void *CQHandler(void *vargp) {
             printClock();
             clockRefresh = 20;
             wrefresh(stdscr);
+            refreshBoxes();
             refresh();
         } else {
             if (termRefresh) {
                 wrefresh(stdscr);
+                refreshBoxes();
                 refresh();
             }
         }
