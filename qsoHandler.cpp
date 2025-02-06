@@ -287,7 +287,7 @@ bool queryCQ(ft8slot_t theSlot) {
     if (!autoCq)
         return false;
 
-/* Only works at the active slot */
+    /* Only works at the active slot */
 
     if (theSlot != activeSlot)
         return false;
@@ -409,11 +409,17 @@ bool updateQsoMachine(ft8slot_t theSlot) {
         txBusy = false;
     } else {
         /* Complete the Tx session */
-        txBusy = handleTx(theSlot);
+        if (theSlot == getActiveSlot())
+            txBusy = handleTx(theSlot);
+        else
+            txBusy = false;
     }
 
     if (!txBusy)
-        return queryCQ(theSlot);
+        if (theSlot == getActiveSlot())
+            return queryCQ(theSlot);
+        else
+            return false;
     else
         return false;
 }
@@ -655,12 +661,10 @@ bool getAutoQSOStatus(void) {
     return (autoQSO == true);
 }
 
-void setActiveSlot(ft8slot_t value)
-{
+void setActiveSlot(ft8slot_t value) {
     activeSlot = value;
 }
 
-ft8slot_t getActiveSlot(void)
-{
+ft8slot_t getActiveSlot(void) {
     return activeSlot;
 }

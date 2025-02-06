@@ -81,9 +81,9 @@ bool getTransmitting(void) {
     return (transmitting == true);
 }
 
+void refreshBoxes(void) {
+    box(stdscr, 0, 0);
 
-void refreshBoxes(void)
-{
     box(trafficW0, 0, 0);
     mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
     wrefresh(trafficW0);
@@ -517,7 +517,10 @@ void printCQ(struct decoder_results *cqReq) {
     /* Reset the cursor position */
     char timeString[10];
 
-    wattrset(cqW, A_NORMAL);
+    if (!strncmp(cqReq->call, dec_options.rcall, strlen(dec_options.rcall)))
+        wattrset(cqW, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
+    else
+        wattrset(cqW, A_NORMAL);
 
     /* convert to localtime */
     struct tm *local = localtime(&cqReq->tempus);
