@@ -233,7 +233,7 @@ bool handleTx(ft8slot_t txSlot) {
             switch (qsoState) {
                 case replyLoc:
                     // Reply FT8Tx FREQ DEST SRC LOC
-                    sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                     queueTx(theMessage);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
@@ -244,14 +244,14 @@ bool handleTx(ft8slot_t txSlot) {
                         sprintf(theLevel, "+%02d", currentQSO.snr);
                     else
                         sprintf(theLevel, "%03d", currentQSO.snr);
-                    sprintf(theMessage, "FT8Tx %d %s %s %s", currentQSO.freq, currentQSO.src, dec_options.rcall, theLevel);
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
                     queueTx(theMessage);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
                 case replyRR73:
-                    sprintf(theMessage, "FT8Tx %d %s %s RR73", currentQSO.freq, currentQSO.src, dec_options.rcall);
+                    sprintf(theMessage, "FT8Tx %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     // Reply DEST SRC RR73
                     queueTx(theMessage);
                     displayTxString(theMessage);
@@ -260,7 +260,7 @@ bool handleTx(ft8slot_t txSlot) {
                     break;
                 case reply73:
                     // Reply DEST SRC 73
-                    sprintf(theMessage, "FT8Tx %d %s %s 73", currentQSO.freq, currentQSO.src, dec_options.rcall);
+                    sprintf(theMessage, "FT8Tx %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     qsoState = idle;
                     queueTx(theMessage);
                     displayTxString(theMessage);
@@ -524,7 +524,7 @@ bool addQso(struct plain_message *newQso) {
         sprintf(currentQSO.dest, "%s", newQso->dest);  // This is the local callId
         sprintf(currentQSO.message, "%s", newQso->message);
         currentQSO.freq = newQso->freq;
-        currentQSO.snr = newQso->snr;
+        currentQSO.snr = newQso->snr - 20; // This is to fix data in dBm
         currentQSO.tempus = newQso->tempus;
         currentQSO.ft8slot = newQso->ft8slot;
 
@@ -614,7 +614,7 @@ bool addCQ(struct plain_message *newQso) {
     sprintf(currentQSO.dest, "");
     sprintf(currentQSO.message, "CQ");
     currentQSO.freq = newQso->freq;
-    currentQSO.snr = newQso->snr;
+    currentQSO.snr = newQso->snr - 20; // Adjust the value
     currentQSO.tempus = newQso->tempus;
     currentQSO.ft8slot = newQso->ft8slot;
 
