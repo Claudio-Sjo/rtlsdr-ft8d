@@ -380,13 +380,13 @@ void refreshStatus(bool refresh) {
         wattrset(statusW, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
 
         mvwprintw(statusW, 6, 17, "Tx");
-        wattrset(cqW, A_NORMAL);
+        wattrset(statusW, A_NORMAL);
 
     } else {
         wattrset(statusW, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
         mvwprintw(statusW, 6, 17, "Rx");
-        wattrset(cqW, A_NORMAL);
+        wattrset(statusW, A_NORMAL);
     }
 
     mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, SLOT ODD/EVEN, AUTOCQ ON/OFF");
