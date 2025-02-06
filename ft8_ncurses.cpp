@@ -375,7 +375,19 @@ void refreshStatus(bool refresh) {
     mvwprintw(statusW, 3, 3, " Auto QSO   : %s", getAutoQSOStatus() ? "ON " : "OFF");
     mvwprintw(statusW, 4, 3, " Active Slot: %s", (getActiveSlot() == odd) ? "ODD " : "EVEN");
 
-    mvwprintw(statusW, 6, 3, " RTx        : %s", getTransmitting() ? "Tx" : "Rx");
+    mvwprintw(statusW, 6, 3, " RTx        : ");
+    if (getTransmitting()) {
+        wattrset(statusW, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
+
+        mvwprintw(statusW, 6, 17, "Tx");
+        wattrset(cqW, A_NORMAL);
+
+    } else {
+        wattrset(statusW, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
+
+        mvwprintw(statusW, 6, 17, "Rx");
+        wattrset(cqW, A_NORMAL);
+    }
 
     mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, SLOT ODD/EVEN, AUTOCQ ON/OFF");
     mvwprintw(statusW, 9, 3, "          AUTOREPLY ON/OFF, AUTOQSO ON/OFF");
