@@ -235,6 +235,7 @@ bool handleTx(ft8slot_t txSlot) {
                     // Reply FT8Tx FREQ DEST SRC LOC
                     sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                     queueTx(theMessage);
+                    sprintf(theMessage, "LOC %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
                     break;
@@ -246,6 +247,7 @@ bool handleTx(ft8slot_t txSlot) {
                         sprintf(theLevel, "%03d", currentQSO.snr);
                     sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
                     queueTx(theMessage);
+                    sprintf(theMessage, "SIG %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
@@ -254,6 +256,7 @@ bool handleTx(ft8slot_t txSlot) {
                     sprintf(theMessage, "FT8Tx %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     // Reply DEST SRC RR73
                     queueTx(theMessage);
+                    sprintf(theMessage, "RR73 %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
@@ -263,6 +266,7 @@ bool handleTx(ft8slot_t txSlot) {
                     sprintf(theMessage, "FT8Tx %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     qsoState = idle;
                     queueTx(theMessage);
+                    sprintf(theMessage, "73 %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     displayTxString(theMessage);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
@@ -300,6 +304,7 @@ bool queryCQ(ft8slot_t theSlot) {
         LOG(LOG_DEBUG, "queryCq Transmitting %s\n", cqMessage);
 
         queueTx(cqMessage);
+        sprintf(cqMessage, "%d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
         displayTxString(cqMessage);
         queryRepeat = ft8tick + QUERYCQDELAY;
         return true;
@@ -524,7 +529,7 @@ bool addQso(struct plain_message *newQso) {
         sprintf(currentQSO.dest, "%s", newQso->dest);  // This is the local callId
         sprintf(currentQSO.message, "%s", newQso->message);
         currentQSO.freq = newQso->freq;
-        currentQSO.snr = newQso->snr - 20; // This is to fix data in dBm
+        currentQSO.snr = newQso->snr - 20;  // This is to fix data in dBm
         currentQSO.tempus = newQso->tempus;
         currentQSO.ft8slot = newQso->ft8slot;
 
@@ -614,7 +619,7 @@ bool addCQ(struct plain_message *newQso) {
     sprintf(currentQSO.dest, "");
     sprintf(currentQSO.message, "CQ");
     currentQSO.freq = newQso->freq;
-    currentQSO.snr = newQso->snr - 20; // Adjust the value
+    currentQSO.snr = newQso->snr - 20;  // Adjust the value
     currentQSO.tempus = newQso->tempus;
     currentQSO.ft8slot = newQso->ft8slot;
 

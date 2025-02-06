@@ -590,7 +590,7 @@ void displayTxString(char *txMessage) {
 
     wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // Local messages are RED
 
-    wprintw(qso, "%s, %s\n", timeString, txMessage);
+    wprintw(qso, "%s %s\n", timeString, txMessage);
 
     wrefresh(qso);
     wattrset(qso, A_NORMAL);
