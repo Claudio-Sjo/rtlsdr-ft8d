@@ -623,7 +623,7 @@ void printLog(plain_message *logMsg) {
     if (!strncmp(logMsg->dest, "CQ", 2))             // CQ messages are RED
         wattrset(trafficW, COLOR_PAIR(2) | A_BOLD);  // QSO are GREEN
 
-    if (!strncmp(logMsg->message, dec_options.rcall, strlen(dec_options.rcall)))
+    if (!strncmp(logMsg->dest, dec_options.rcall, strlen(dec_options.rcall)))
         wattrset(trafficW, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
     /* convert to localtime */
