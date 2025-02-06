@@ -406,7 +406,7 @@ bool updateQsoMachine(ft8slot_t theSlot) {
     /* Check if QSO in timeout, if so close it */
     if (ft8tick >= ft8time) {
         /* Check if the QSO can be considered closed, if so log the record */
-        if ((qsoState != replyLoc) && (qsoState != replySig)) {
+        if ((qsoState != replyLoc) && (qsoState != replySig) && (qsoState != idle)) {
             /* This QSO shall be logged */
             logToAdi(&currentQSO);
         }
@@ -510,19 +510,21 @@ peermsg_t parseMsg(char *msg) {
     return locMsg;
 }
 
+
+// return true if skipping this request
 bool addQso(struct plain_message *newQso) {
     if (!autoQSO)
-        return false;
+        return true;
 
     /* Only accept signals in the active slot */
     if (newQso->ft8slot != activeSlot)
-        return false;
+        return true;
 
     /* We accept new QSO if we are Idle */
     if (qsoState == idle) {
         /* If we had already a QSO with that peer we reject the QSO */
         if (checkPeer(newQso->src))
-            return false;
+            return true;
 
         ft8time = ft8tick + MAXQSOLIFETIME;
         sprintf(currentQSO.src, "%s", newQso->src);    // This is the Peer for the QSO
@@ -549,13 +551,13 @@ bool addQso(struct plain_message *newQso) {
             default:  // This should NEVER happen
                 break;
         }
-        if (qsoState != idle)
-            return true;
+        // if (qsoState != idle)
+        return false;  // Accept this QSO and stop adding other
     } else {
         /* This may be a spurious request or an update to the current QSO */
 
         if (strcmp(newQso->src, currentQSO.src) != 0)
-            return false;
+            return true;  // This is another QSO interfering, skip
 
         sprintf(currentQSO.message, "%s", newQso->message);
 
@@ -593,26 +595,26 @@ bool addQso(struct plain_message *newQso) {
                 // qsoState = idle;
                 break;
         }
-        if (qsoState != idle)
-            return true;
+        // if (qsoState != idle)
+        return false;  // We have accepted this update and skip the other
     }
-    return false;
+    return true; // If we are here, we skip the current request and wait for other
 }
 
 /* Thi function is called when automatic CQ answer is enabled */
 bool addCQ(struct plain_message *newQso) {
     if (!autoCqReply)
-        return false;
+        return true;
 
     if (qsoState != idle)
-        return false;
+        return true;
 
     if (newQso->ft8slot != activeSlot)
-        return false;
+        return true;
 
     /* If we had already a QSO with that peer we reject the QSO */
     if (checkPeer(newQso->src))
-        return false;
+        return true;
 
     ft8time = ft8tick + MAXQSOLIFETIME;
     sprintf(currentQSO.src, "%s", newQso->src);  // This is the Peer for the QSO
@@ -627,7 +629,7 @@ bool addCQ(struct plain_message *newQso) {
 
     qsoState = replyLoc;  // This is a CQ
 
-    return true;
+    return false;
 }
 
 void enableAutoCQ(void) {
