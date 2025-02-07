@@ -56,6 +56,11 @@ int activeWin = CQWIN;
 char txString[MAXTXSTRING];
 char editString[MAXTXSTRING];
 
+/* Thread related flags */
+bool exitTxThread = false;
+bool exitKBHThread = false;
+
+
 // struct decoder_results cqReq[MAXCQ];
 struct plain_message qsoReq[MAXCQ];
 int cqFirst, cqLast, cqIdx;
@@ -298,7 +303,7 @@ void *TXHandler(void *vargp) {
 
     txStatusFlag = TX_IDLE;
 
-    while (true) {
+    while (exitTxThread == false) {
         if (tx_queue.size()) {
             // Receive the message from the queue
             pthread_mutex_lock(&TXlock);
@@ -415,7 +420,7 @@ void *KBDHandler(void *vargp) {
     static int status = IDLE;
     FT8Msg Txletter;
 
-    while (true) {
+    while (exitKBHThread == false) {
         /* CQlock */
 
         char key = toupper(wgetch(call));
@@ -734,4 +739,14 @@ void *CQHandler(void *vargp) {
 
         usleep(10000); /* Wait 10 msec.*/
     }
+}
+
+void close_TxThread(void)
+{
+    exitTxThread = true;
+}
+
+void close_KbhThread(void)
+{
+    exitKBHThread = true;
 }

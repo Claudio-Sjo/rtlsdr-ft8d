@@ -23,3 +23,5 @@ void *TXHandler(void *vargp);
 void printHeaders(void);
 void displayTxString(char *txMsg);
 
+void close_TxThread(void);
+void close_KbhThread(void);

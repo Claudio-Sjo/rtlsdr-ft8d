@@ -5,6 +5,10 @@
     QSO Handler keeps a timer supervising the QSO, that timer steps every slot.
     A QSO can be initiated by a CQ or by a reply to a CQ.
     Every QSO is queued in a QSO Log file
+
+    New approach, this shall be another thread so that decoding work is not
+    interrupted. Two queues are added, one for data and one for triggering.
+
 */
 
 #include <stdio.h>
@@ -47,13 +51,15 @@ extern char pskreporter_app_version[];
 extern std::vector<struct decoder_results> cq_queue;
 extern std::vector<struct plain_message> qso_queue;
 extern std::vector<struct plain_message> log_queue;
+extern std::vector<struct tick_message> tick_queue;
+extern std::vector<struct plain_message> qsoh_queue;
 extern pthread_mutex_t CQlock;
 extern pthread_mutex_t QSOlock;
 extern pthread_mutex_t LOGlock;
+extern pthread_mutex_t Ticklock;
+extern pthread_mutex_t QSOHlock;
 extern struct decoder_options dec_options;
 extern struct receiver_options rx_options;
-
-extern ft8slot_t thisSlot;
 
 extern pthread_mutex_t TXlock;
 extern std::vector<FT8Msg> tx_queue;
@@ -78,6 +84,7 @@ static uint32_t peersIdx = 0;
 static bool autoCq = false;
 static bool autoCqReply = false;
 static bool autoQSO = false;
+static bool qsoExit = false;
 
 static ft8slot_t activeSlot = even;
 
@@ -284,17 +291,17 @@ bool handleTx(ft8slot_t txSlot) {
     return true;
 }
 
-bool queryCQ(ft8slot_t theSlot) {
+void queryCQ(ft8slot_t theSlot) {
 #ifdef TESTQSO
-    return false;
+    return;
 #endif
     if (!autoCq)
-        return false;
+        return;
 
     /* Only works at the active slot */
 
     if (theSlot != activeSlot)
-        return false;
+        return;
 
     char cqMessage[255];
     static uint32_t queryRepeat = 0;
@@ -307,9 +314,7 @@ bool queryCQ(ft8slot_t theSlot) {
         sprintf(cqMessage, "%d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
         displayTxString(cqMessage);
         queryRepeat = ft8tick + QUERYCQDELAY;
-        return true;
     }
-    return false;
 }
 
 /* Test routines */
@@ -396,9 +401,7 @@ queryCq() must be called AFTER this function
 In case the Tx is idle, it returns true,
 otherwise it returns false.
 */
-bool updateQsoMachine(ft8slot_t theSlot) {
-    ft8tick++;
-
+void updateQsoMachine(ft8slot_t theSlot) {
 #ifdef TESTQSO
     testCaseExec(theSlot);
 #endif
@@ -422,11 +425,7 @@ bool updateQsoMachine(ft8slot_t theSlot) {
 
     if (!txBusy)
         if (theSlot == getActiveSlot())
-            return queryCQ(theSlot);
-        else
-            return false;
-    else
-        return false;
+            queryCQ(theSlot);
 }
 
 /* State Machine Description */
@@ -510,21 +509,20 @@ peermsg_t parseMsg(char *msg) {
     return locMsg;
 }
 
-
 // return true if skipping this request
-bool addQso(struct plain_message *newQso) {
+void addQso(struct plain_message *newQso) {
     if (!autoQSO)
-        return true;
+        return;
 
     /* Only accept signals in the active slot */
     if (newQso->ft8slot != activeSlot)
-        return true;
+        return;
 
     /* We accept new QSO if we are Idle */
     if (qsoState == idle) {
         /* If we had already a QSO with that peer we reject the QSO */
         if (checkPeer(newQso->src))
-            return true;
+            return;
 
         ft8time = ft8tick + MAXQSOLIFETIME;
         sprintf(currentQSO.src, "%s", newQso->src);    // This is the Peer for the QSO
@@ -551,13 +549,11 @@ bool addQso(struct plain_message *newQso) {
             default:  // This should NEVER happen
                 break;
         }
-        // if (qsoState != idle)
-        return false;  // Accept this QSO and stop adding other
     } else {
         /* This may be a spurious request or an update to the current QSO */
 
         if (strcmp(newQso->src, currentQSO.src) != 0)
-            return true;  // This is another QSO interfering, skip
+            return;  // This is another QSO interfering, skip
 
         sprintf(currentQSO.message, "%s", newQso->message);
 
@@ -595,26 +591,23 @@ bool addQso(struct plain_message *newQso) {
                 // qsoState = idle;
                 break;
         }
-        // if (qsoState != idle)
-        return false;  // We have accepted this update and skip the other
     }
-    return true; // If we are here, we skip the current request and wait for other
 }
 
 /* Thi function is called when automatic CQ answer is enabled */
-bool addCQ(struct plain_message *newQso) {
+void addCQ(struct plain_message *newQso) {
     if (!autoCqReply)
-        return true;
+        return;
 
     if (qsoState != idle)
-        return true;
+        return;
 
     if (newQso->ft8slot != activeSlot)
-        return true;
+        return;
 
     /* If we had already a QSO with that peer we reject the QSO */
     if (checkPeer(newQso->src))
-        return true;
+        return;
 
     ft8time = ft8tick + MAXQSOLIFETIME;
     sprintf(currentQSO.src, "%s", newQso->src);  // This is the Peer for the QSO
@@ -628,8 +621,6 @@ bool addCQ(struct plain_message *newQso) {
     LOG(LOG_DEBUG, "addCQ From %s\n", currentQSO.src);
 
     qsoState = replyLoc;  // This is a CQ
-
-    return false;
 }
 
 void enableAutoCQ(void) {
@@ -674,4 +665,58 @@ void setActiveSlot(ft8slot_t value) {
 
 ft8slot_t getActiveSlot(void) {
     return activeSlot;
+}
+
+/* QSO Handler Thread */
+void *QSOHandler(void *vargp) {
+    static bool termRefresh = true;
+    int dynamicRefresh = 0;
+    uint32_t clockRefresh = 60;
+
+    while (qsoExit == false) {
+        char key;
+        struct decoder_results dr;
+        struct plain_message qsoMsg;
+        struct plain_message logMsg;
+        struct tick_message tickMsg;
+
+        /* Wait for the trigger event, this brings the current slot */
+        while (tick_queue.size() == 0) {
+            usleep(100000); /* Wait 100 msec.*/
+        }
+
+        while (tick_queue.size()) {
+            pthread_mutex_lock(&Ticklock);
+            tickMsg = tick_queue.front();
+            tick_queue.erase(tick_queue.begin());
+            pthread_mutex_unlock(&Ticklock);
+            tickMsg.currentSlot;
+            ft8tick++;
+        }
+
+        /* Here we feed the state machine with new data */
+        while (qso_queue.size()) {
+            pthread_mutex_lock(&QSOHlock);
+            qsoMsg = qsoh_queue.front();
+            qsoh_queue.erase(qsoh_queue.begin());
+            pthread_mutex_unlock(&QSOHlock);
+
+            /* Check if it's a CQ or a generic message */
+            if (!strcmp(qsoMsg.dest, "CQ"))
+                addCQ(&qsoMsg);
+            else {
+                /* Only handle messages targeting us */
+                if (!strcmp(qsoMsg.dest, dec_options.rcall)) {
+                    addQso(&qsoMsg);
+                }
+            }
+        }
+
+        /* Last action is to run the QSO state machine*/
+        updateQsoMachine(tickMsg.currentSlot);
+    } /* end of forever loop */
+}
+
+void close_qso_handler(void) {
+    qsoExit = true;
 }

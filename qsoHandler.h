@@ -49,9 +49,8 @@ typedef enum _peermsg_t { cqMsg,
 
 void initQsoState(void);
 bool queryCQ(void);
-bool updateQsoMachine(ft8slot_t theSlot);
-bool addQso(struct plain_message *newQso);
-bool addCQ(struct plain_message *newQso);
+void close_qso_handler(void);
+
 
 void enableAutoCQ(void);
 void disableAutoCQ(void);
@@ -64,3 +63,4 @@ void disableAutoQSO(void);
 bool getAutoQSOStatus(void);
 void setActiveSlot(ft8slot_t value);
 ft8slot_t getActiveSlot(void);
+void *QSOHandler(void *vargp);

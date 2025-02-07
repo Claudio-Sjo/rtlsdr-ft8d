@@ -61,8 +61,20 @@ void printSpots(uint32_t n_results);
 /* Thread for decoding */
 static struct decoder_thread decThread;
 
-/* Thread for 'spotting' */
-pthread_t spottingThread;
+/* QSO Thread */
+pthread_t qsoThread;
+
+/* PSK reporter thread */
+pthread_t pskThread;
+
+/* CQHandler window thread */
+pthread_t CQHThread;
+
+/* Keyboard Handler thread */
+pthread_t KBHThread;
+
+/* Transmission Handler thread */
+pthread_t TXHThread;
 
 /* Thread for RX (blocking function used) & RTL struct */
 static pthread_t rxThread;
@@ -73,6 +85,8 @@ static fftwf_plan fft_plan;
 static fftwf_complex *fft_in, *fft_out;
 static FILE *fp_fftw_wisdom_file;
 static float *hann;
+
+bool exitPskThread = false;
 
 /* Global declaration for states & options, shared with other external objects */
 
@@ -85,12 +99,19 @@ vector<struct decoder_results> cq_queue;
 vector<struct plain_message> qso_queue;
 vector<struct plain_message> log_queue;
 
+/* QSOHandler Threads */
+vector<struct tick_message> tick_queue;
+vector<struct plain_message> qsoh_queue;
+
 /* mutex for thread sync */
 pthread_mutex_t msglock = PTHREAD_MUTEX_INITIALIZER;
-;
 pthread_mutex_t CQlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* QSOHandler mutexes */
+pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
 const char *rtlsdr_ft8d_version = "0.6.3";
@@ -378,7 +399,7 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 #define MAX_REPORTS_PER_PACKET 64
 
 void *pskUploader(void *vargp) {
-    while (1) {
+    while (exitPskThread == false) {
         if (dec_results_queue.size() > 0) {
             sleep(60);
             pthread_mutex_lock(&lock);
@@ -404,6 +425,10 @@ void *pskUploader(void *vargp) {
             sleep(60);
         }
     }
+}
+
+void closePskThread(void) {
+    exitPskThread = true;
 }
 
 /* PSKreporter protocol documentation & links:
@@ -865,7 +890,6 @@ ftx_callsign_hash_interface_t hash_if = {
     .save_hash = hashtable_add};
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
-    bool qsoPossible = true;
     /* Get the slot type */
     struct timeval lTime;
     gettimeofday(&lTime, NULL);
@@ -1039,22 +1063,22 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
 
                 decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-                decodes[num_decoded].snr = (int32_t)cand->score -20;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
                 decodes[num_decoded].tempus = current_time;
 
                 pthread_mutex_unlock(&msglock);
 
-                if (qsoPossible == true) {
-                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
-                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                    qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
-                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-                    qsoMsg.tempus = current_time;
+                /* Feed the QSO Handler machine */
+                snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
+                sprintf(qsoMsg.dest, "CQ");
+                qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+                qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
+                qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                qsoMsg.tempus = current_time;
 
-                    /* Don't reply to our own CQ */
-                    if (strcmp(qsoMsg.src, dec_options.rcall))
-                        qsoPossible = addCQ(&qsoMsg);
-                }
+                pthread_mutex_lock(&QSOHlock);
+                qsoh_queue.push_back(qsoMsg);
+                pthread_mutex_unlock(&QSOHlock);
 
                 num_decoded++;
             } else
@@ -1081,11 +1105,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qso_queue.push_back(qsoMsg);
                     pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
 
-                    if (qsoPossible == true) {
-                        /* Avoid trying a QSO with ourselves */
-                        if (strcmp(qsoMsg.src, dec_options.rcall))
-                            qsoPossible = addQso(&qsoMsg);
-                    }
+                    /* Feed the QSO Handler machine */
+                    pthread_mutex_lock(&QSOHlock);
+                    qsoh_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOHlock);
                 }
             }
             // In any case we will log the message
@@ -1115,8 +1138,14 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     *n_results = num_decoded;
-    if (updateQsoMachine(thisSlot) == true)
-    {}
+
+    /* Trigger the QSO Handler state machine */
+    struct tick_message tickMsg;
+    tickMsg.currentSlot = thisSlot;
+
+    pthread_mutex_lock(&Ticklock);
+    tick_queue.push_back(tickMsg);
+    pthread_mutex_unlock(&Ticklock);
 }
 
 void usage(FILE *stream, int32_t status) {
@@ -1513,10 +1542,11 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&decThread.ready_mutex, NULL);
     pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
-    pthread_create(&spottingThread, NULL, pskUploader, NULL);
-    pthread_create(&spottingThread, NULL, CQHandler, NULL);
-    pthread_create(&spottingThread, NULL, KBDHandler, NULL);
-    pthread_create(&spottingThread, NULL, TXHandler, NULL);
+    pthread_create(&pskThread, NULL, pskUploader, NULL);
+    pthread_create(&CQHThread, NULL, CQHandler, NULL);
+    pthread_create(&KBHThread, NULL, KBDHandler, NULL);
+    pthread_create(&TXHThread, NULL, TXHandler, NULL);
+    pthread_create(&qsoThread, NULL, QSOHandler, NULL);
 
     /* Main loop : Wait, read, decode */
     /* TODO */
@@ -1577,6 +1607,22 @@ int main(int argc, char **argv) {
     /* Wait the thread join (send a signal before to terminate the job) */
     pthread_join(decThread.thread, NULL);
     pthread_join(rxThread, NULL);
+
+    /* Destroy PSK uploader */
+    closePskThread();
+    pthread_join(pskThread, NULL);
+
+    /* Destroy QSO handler */
+    close_qso_handler();
+    pthread_join(qsoThread, NULL);
+
+    /* Destroy TXThread */
+    close_TxThread();
+    pthread_join(TXHThread, NULL);
+
+    /* Destroy Keyboard Handling thread */
+    close_KbhThread();
+    pthread_join(KBHThread, NULL);
 
     /* Destroy the lock/cond/thread */
     pthread_cond_destroy(&decThread.ready_cond);
@@ -1697,18 +1743,18 @@ wrefresh(trafficW);
     decode(&mon, NULL, decodes, n_results);
 }
 
-void enableReporting(void){
+void enableReporting(void) {
     rx_options.noreport = false;
 }
 
-void disableReporting(void){
+void disableReporting(void) {
     rx_options.noreport = true;
 }
 
-bool getReportingStatus(void){
+bool getReportingStatus(void) {
     return (rx_options.noreport == false);
 }
 
-void programQuit(void){
+void programQuit(void) {
     rx_state.exit_flag = true;
 }

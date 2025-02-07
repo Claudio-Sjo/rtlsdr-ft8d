@@ -161,6 +161,10 @@ struct plain_message {
     ft8slot_t ft8slot;
 };
 
+struct tick_message {
+    ft8slot_t currentSlot;
+};
+
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);
 static void *rtlsdr_rx(void *arg);
 static void sigint_callback_handler(int signum);
