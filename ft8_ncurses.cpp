@@ -57,9 +57,9 @@ char txString[MAXTXSTRING];
 char editString[MAXTXSTRING];
 
 /* Thread related flags */
-bool exitTxThread = false;
-bool exitKBHThread = false;
-
+volatile bool exitTxThread = false;
+volatile bool exitKBHThread = false;
+volatile bool exitCQThread = false;
 
 // struct decoder_results cqReq[MAXCQ];
 struct plain_message qsoReq[MAXCQ];
@@ -238,7 +238,7 @@ int init_ncurses(uint32_t initialFreq) {
 }
 
 int close_ncurses() {
-    getch();
+    // getch();
 
     endwin();
 
@@ -366,6 +366,8 @@ void *TXHandler(void *vargp) {
         }
         usleep(10000);  // Wait 10msec
     }
+
+    return NULL;
 }
 
 // End of the tx interface
@@ -423,7 +425,14 @@ void *KBDHandler(void *vargp) {
     while (exitKBHThread == false) {
         /* CQlock */
 
-        char key = toupper(wgetch(call));
+        nodelay(call, true);
+        int key;
+        while ((key = wgetch(call)) == ERR) {
+            usleep(10000);
+            if (exitKBHThread)
+                return NULL;
+        }
+        key = toupper(key);
         int ix = strlen(editString);
 
         switch (status) {
@@ -527,6 +536,8 @@ void *KBDHandler(void *vargp) {
         pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
         usleep(10000);                   // Wait 10msec
     }
+
+    return NULL;
 }
 
 void printCQ(struct decoder_results *cqReq) {
@@ -672,7 +683,7 @@ void *CQHandler(void *vargp) {
     int dynamicRefresh = 0;
     uint32_t clockRefresh = 60;
 
-    while (true) {
+    while (exitCQThread == false) {
         char key;
         struct decoder_results dr;
         struct plain_message qsoMsg;
@@ -739,14 +750,18 @@ void *CQHandler(void *vargp) {
 
         usleep(10000); /* Wait 10 msec.*/
     }
+
+    return NULL;
 }
 
-void close_TxThread(void)
-{
+void close_TxThread(void) {
     exitTxThread = true;
 }
 
-void close_KbhThread(void)
-{
+void close_KbhThread(void) {
     exitKBHThread = true;
+}
+
+void close_CQThread(void) {
+    exitCQThread = true;
 }

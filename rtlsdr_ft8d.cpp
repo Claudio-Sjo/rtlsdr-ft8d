@@ -86,7 +86,7 @@ static fftwf_complex *fft_in, *fft_out;
 static FILE *fp_fftw_wisdom_file;
 static float *hann;
 
-bool exitPskThread = false;
+volatile bool exitPskThread = false;
 
 /* Global declaration for states & options, shared with other external objects */
 
@@ -114,8 +114,8 @@ pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.6.3";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.3";
+const char *rtlsdr_ft8d_version = "0.6.4";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.4";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -392,6 +392,11 @@ inline uint32_t SwapEndian32(uint32_t val) {
     return (val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24);
 }
 
+bool exitFlag(void)
+{
+    return (rx_state.exit_flag == true);
+}
+
 PskReporter *reporter = NULL;
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -399,9 +404,17 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 #define MAX_REPORTS_PER_PACKET 64
 
 void *pskUploader(void *vargp) {
-    while (exitPskThread == false) {
+    while (exitFlag() == false) {
         if (dec_results_queue.size() > 0) {
-            sleep(60);
+            int i = 0;
+
+            while (i < 60) {
+                sleep(1);
+                i++;
+                if (exitFlag()) {
+                    i = 60;
+                }
+            }
             pthread_mutex_lock(&lock);
 
             while (dec_results_queue.size() > MAX_REPORTS_PER_PACKET) {
@@ -422,9 +435,18 @@ void *pskUploader(void *vargp) {
             pthread_mutex_unlock(&lock);
 
         } else {
-            sleep(60);
+            int i = 0;
+            while (i < 60) {
+                sleep(1);
+                i++;
+                if (exitFlag()) {
+                    i = 60;
+                }
+            }
         }
     }
+
+    return NULL;
 }
 
 void closePskThread(void) {
@@ -1608,13 +1630,13 @@ int main(int argc, char **argv) {
     pthread_join(decThread.thread, NULL);
     pthread_join(rxThread, NULL);
 
-    /* Destroy PSK uploader */
-    closePskThread();
-    pthread_join(pskThread, NULL);
-
     /* Destroy QSO handler */
     close_qso_handler();
     pthread_join(qsoThread, NULL);
+
+    /* Destroy PSK uploader */
+    closePskThread();
+    pthread_join(pskThread, NULL);
 
     /* Destroy TXThread */
     close_TxThread();
@@ -1623,6 +1645,10 @@ int main(int argc, char **argv) {
     /* Destroy Keyboard Handling thread */
     close_KbhThread();
     pthread_join(KBHThread, NULL);
+
+    /* Destroy Keyboard Handling thread */
+    close_CQThread();
+    pthread_join(CQHThread, NULL);
 
     /* Destroy the lock/cond/thread */
     pthread_cond_destroy(&decThread.ready_cond);

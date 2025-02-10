@@ -25,3 +25,4 @@ void displayTxString(char *txMsg);
 
 void close_TxThread(void);
 void close_KbhThread(void);
+void close_CQThread(void);

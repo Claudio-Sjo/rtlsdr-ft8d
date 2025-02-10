@@ -97,7 +97,7 @@ struct decoder_thread {
 /* Option & config of the receiver */
 struct receiver_state {
     /* Variables used for stop conditions */
-    bool exit_flag;
+    volatile bool exit_flag;
 
     /* Double buffering used for sampling */
     float iSamples[2][SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE];
@@ -191,3 +191,4 @@ void enableReporting(void);
 void disableReporting(void);
 bool getReportingStatus(void);
 void programQuit(void);
+bool exitFlag(void);

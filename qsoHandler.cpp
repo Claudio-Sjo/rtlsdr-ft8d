@@ -27,6 +27,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <curl/curl.h>
+#include <atomic>
 
 #include <rtlsdr_ft8d.h>
 
@@ -84,7 +85,8 @@ static uint32_t peersIdx = 0;
 static bool autoCq = false;
 static bool autoCqReply = false;
 static bool autoQSO = false;
-static bool qsoExit = false;
+// static volatile bool qsoExit = false;
+std::atomic<bool> qsoExit(false);
 
 static ft8slot_t activeSlot = even;
 
@@ -673,7 +675,7 @@ void *QSOHandler(void *vargp) {
     int dynamicRefresh = 0;
     uint32_t clockRefresh = 60;
 
-    while (qsoExit == false) {
+    while (qsoExit.load() == false) {
         char key;
         struct decoder_results dr;
         struct plain_message qsoMsg;
@@ -682,6 +684,8 @@ void *QSOHandler(void *vargp) {
 
         /* Wait for the trigger event, this brings the current slot */
         while (tick_queue.size() == 0) {
+            if (qsoExit.load() == true)
+                break;      /* Abort case, final sig */
             usleep(100000); /* Wait 100 msec.*/
         }
 
@@ -690,7 +694,7 @@ void *QSOHandler(void *vargp) {
             tickMsg = tick_queue.front();
             tick_queue.erase(tick_queue.begin());
             pthread_mutex_unlock(&Ticklock);
-            tickMsg.currentSlot;
+            // tickMsg.currentSlot;
             ft8tick++;
         }
 
@@ -714,9 +718,12 @@ void *QSOHandler(void *vargp) {
 
         /* Last action is to run the QSO state machine*/
         updateQsoMachine(tickMsg.currentSlot);
+
     } /* end of forever loop */
+
+    return NULL;
 }
 
 void close_qso_handler(void) {
-    qsoExit = true;
+    qsoExit.store(true);
 }
