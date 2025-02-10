@@ -114,8 +114,8 @@ pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.6.4";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.6.4";
+const char *rtlsdr_ft8d_version = "0.7.0";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.7.0";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -1122,10 +1122,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                     qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
                     qsoMsg.tempus = current_time;
-
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
 
                     /* Feed the QSO Handler machine */
                     pthread_mutex_lock(&QSOHlock);

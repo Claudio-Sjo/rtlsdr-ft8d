@@ -572,24 +572,40 @@ void printCQ(struct decoder_results *cqReq) {
 void printQSORemote(plain_message *logMsg) {
     char timeString[10];
 
-    wattrset(qso, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
-
-    /* convert to localtime */
-    struct tm *local = localtime(&logMsg->tempus);
     ft8slot_t thisSlot = ((logMsg->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
-    /* and set the string */
-    sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+    if (!strncmp(logMsg->src, dec_options.rcall, strlen(dec_options.rcall))) {
+        wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // Print in RED
+        /* convert to localtime */
+        time_t t = time(NULL);
+        struct tm *local = localtime(&t);
+        sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+        wprintw(qso, "%s %dHz %s %s %s %s\n",
+                timeString,
+                logMsg->freq,
+                logMsg->dest,
+                logMsg->src,
+                logMsg->message,
+                (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
+    }
+    else {
+        wattrset(qso, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
-    wprintw(qso, "%s %dHz  %3ddB %s %s %s %s\n",
-            timeString,
-            logMsg->freq,
-            logMsg->snr - 20,
-            logMsg->dest,
-            logMsg->src,
-            logMsg->message,
-            (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
+        /* convert to localtime */
+        struct tm *local = localtime(&logMsg->tempus);
 
+        /* and set the string */
+        sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+
+        wprintw(qso, "%s %dHz  %3ddB %s %s %s %s\n",
+                timeString,
+                logMsg->freq,
+                logMsg->snr - 20,
+                logMsg->dest,
+                logMsg->src,
+                logMsg->message,
+                (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
+    }
     wrefresh(qso);
     wattrset(qso, A_NORMAL);
 }

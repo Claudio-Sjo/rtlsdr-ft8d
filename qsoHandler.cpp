@@ -70,7 +70,7 @@ extern std::vector<FT8Msg> tx_queue;
 
 #define MAXQSOPEERS 512  // size of the Peer's database
 
-#define MAXQSOLIFETIME 4  // in quarter of a minute
+#define MAXQSOLIFETIME 8  // in quarter of a minute
 #define QUERYCQDELAY 3    // in quarter of a minute
 
 /* Variables */
@@ -232,6 +232,15 @@ void queueTx(char *txString) {
     It returns true if there are transmissions scheduled
 */
 bool handleTx(ft8slot_t txSlot) {
+    plain_message qsoMsg;
+
+    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", dec_options.rcall);
+    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", currentQSO.src);
+
+    qsoMsg.freq = dec_options.freq;
+
+    qsoMsg.ft8slot = txSlot;  // This is useful only in QSO mode
+
     if (qsoState == idle)
         return false;
     else {
@@ -244,8 +253,11 @@ bool handleTx(ft8slot_t txSlot) {
                     // Reply FT8Tx FREQ DEST SRC LOC
                     sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                     queueTx(theMessage);
-                    sprintf(theMessage, "LOC %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
-                    displayTxString(theMessage);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", dec_options.rloc);
+
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
                     break;
                 case replySig:
@@ -256,8 +268,11 @@ bool handleTx(ft8slot_t txSlot) {
                         sprintf(theLevel, "%03d", currentQSO.snr);
                     sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
                     queueTx(theMessage);
-                    sprintf(theMessage, "SIG %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
-                    displayTxString(theMessage);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", theLevel);
+
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -265,8 +280,11 @@ bool handleTx(ft8slot_t txSlot) {
                     sprintf(theMessage, "FT8Tx %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     // Reply DEST SRC RR73
                     queueTx(theMessage);
-                    sprintf(theMessage, "RR73 %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
-                    displayTxString(theMessage);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "RR73");
+
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -275,8 +293,11 @@ bool handleTx(ft8slot_t txSlot) {
                     sprintf(theMessage, "FT8Tx %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
                     qsoState = idle;
                     queueTx(theMessage);
-                    sprintf(theMessage, "73 %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
-                    displayTxString(theMessage);
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "73");
+
+                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+                    qso_queue.push_back(qsoMsg);
+                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -594,6 +615,10 @@ void addQso(struct plain_message *newQso) {
                 break;
         }
     }
+
+    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
+    qso_queue.push_back(*newQso);
+    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
 }
 
 /* Thi function is called when automatic CQ answer is enabled */
@@ -699,7 +724,7 @@ void *QSOHandler(void *vargp) {
         }
 
         /* Here we feed the state machine with new data */
-        while (qso_queue.size()) {
+        while (qsoh_queue.size()) {
             pthread_mutex_lock(&QSOHlock);
             qsoMsg = qsoh_queue.front();
             qsoh_queue.erase(qsoh_queue.begin());
