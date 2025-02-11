@@ -75,6 +75,7 @@ extern std::vector<FT8Msg> tx_queue;
 
 /* Variables */
 static qsostate_t qsoState = idle;
+static qsostate_t qsoOldState = idle;
 static struct plain_message currentQSO;
 static uint32_t ft8time = 0;
 static uint32_t ft8tick = 0;
@@ -142,6 +143,7 @@ void logToAdi(struct plain_message *completedQSO) {
 
 void initQsoState(void) {
     qsoState = idle;
+    qsoOldState = idle;
     ft8time = 0;
     ft8tick = 0;
     currentQSO.src[0] = 0;   // This is the Peer for the QSO
@@ -157,6 +159,7 @@ void initQsoState(void) {
 
 static void resetQsoState(void) {
     qsoState = idle;
+    qsoOldState = idle;
     currentQSO.src[0] = 0;
     currentQSO.dest[0] = 0;
     currentQSO.message[0] = 0;
@@ -583,15 +586,15 @@ void addQso(struct plain_message *newQso) {
         /* Here we are in the case of updating the QSO */
         switch (parseMsg(currentQSO.message)) {
             case locMsg:  // We are not in Idle, when receiving LOC we reply SIG
-                qsoState = replySig;
+                qsoState = qsoOldState = replySig;
                 LOG(LOG_DEBUG, "addQso received Loc\n");
                 break;
             case sigMsg:
                 LOG(LOG_DEBUG, "addQso received Sig\n");
-                if (qsoState == replyLoc)  // We have sent LOC, we reply SIG
+                // if (qsoState == replyLoc)  // We have sent LOC, we reply SIG
                     qsoState = replySig;
-                else  // Otherwise we reply RR73
-                    qsoState = replyRR73;
+                // else  // Otherwise we reply RR73
+                //    qsoState = replyRR73;
                 break;
             case RR73Msg:  // If we receive RR73 we reply 73 and close the QSO
                 LOG(LOG_DEBUG, "addQso received RR73\n");
