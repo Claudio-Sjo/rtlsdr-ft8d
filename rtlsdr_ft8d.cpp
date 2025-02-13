@@ -113,9 +113,13 @@ pthread_mutex_t LOGlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
+PskReporter *reporter = NULL;
+
+pthread_mutex_t replock = PTHREAD_MUTEX_INITIALIZER;
+
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.7.0";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.7.0";
+const char *rtlsdr_ft8d_version = "0.7.1s";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.7.1s";
 
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
@@ -320,7 +324,7 @@ static void *decoder(void *arg) {
         LOG(LOG_DEBUG, "Decoder thread -- Decoding completed\n");
         saveSample(rx_state.iSamples[prevBuffer], rx_state.qSamples[prevBuffer]);
         postSpots(n_results);
-        printSpots(n_results);
+        // printSpots(n_results);  // This is quite suspect, to be handled in a different way
     }
     return NULL;
 }
@@ -392,14 +396,9 @@ inline uint32_t SwapEndian32(uint32_t val) {
     return (val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24);
 }
 
-bool exitFlag(void)
-{
+bool exitFlag(void) {
     return (rx_state.exit_flag == true);
 }
-
-PskReporter *reporter = NULL;
-
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 #define MAX_REPORTS_PER_PACKET 64
 
@@ -415,7 +414,7 @@ void *pskUploader(void *vargp) {
                     i = 60;
                 }
             }
-            pthread_mutex_lock(&lock);
+            pthread_mutex_lock(&replock);
 
             while (dec_results_queue.size() > MAX_REPORTS_PER_PACKET) {
                 for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
@@ -432,7 +431,7 @@ void *pskUploader(void *vargp) {
                 dec_results_queue.erase(dec_results_queue.begin());
             }
             reporter->send();
-            pthread_mutex_unlock(&lock);
+            pthread_mutex_unlock(&replock);
 
         } else {
             int i = 0;
@@ -467,8 +466,6 @@ void postSpots(uint32_t n_results) {
     /* Fixed strings for Mode */
     const char txMode[] = "FT8";
 
-    pthread_mutex_lock(&lock);
-
     for (uint32_t i = 0; i < n_results; i++) {
         struct decoder_results dr;
 
@@ -476,9 +473,11 @@ void postSpots(uint32_t n_results) {
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
+
+        pthread_mutex_lock(&replock);
         dec_results_queue.push_back(dr);
+        pthread_mutex_unlock(&replock);
     }
-    pthread_mutex_unlock(&lock);
 }
 
 /* Report on a WebCluster -- Ex. RBN Network */
@@ -545,8 +544,6 @@ void printSpots(uint32_t n_results) {
 
     for (uint32_t i = 0; i < n_results; i++) {
         pthread_mutex_lock(&msglock);  // Protect decodes structure
-        /* CQlock */
-        pthread_mutex_lock(&CQlock);  // Protect decodes structure
 
 #ifdef TXWINTEST
 
@@ -570,10 +567,12 @@ void printSpots(uint32_t n_results) {
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr;
         dr.tempus = dec_results[i].tempus;
-        cq_queue.push_back(dr);
-
-        pthread_mutex_unlock(&CQlock);   // Protect decodes structure
         pthread_mutex_unlock(&msglock);  // Protect decodes structure
+
+        /* CQlock */
+        pthread_mutex_lock(&CQlock);  // Protect CQ queue
+        cq_queue.push_back(dr);
+        pthread_mutex_unlock(&CQlock);  // Protect decodes structure
     }
 
 #ifdef TXWINTEST
@@ -912,22 +911,18 @@ ftx_callsign_hash_interface_t hash_if = {
     .save_hash = hashtable_add};
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
-    /* Get the slot type */
+    /* Get time info for reporting purposes */
     struct timeval lTime;
     gettimeofday(&lTime, NULL);
-
     ft8slot_t thisSlot = ((lTime.tv_sec / FT8_PERIOD) & 0x01) ? odd : even;
-
-    // time_t current_time = time(NULL);
     time_t current_time = lTime.tv_sec;
 
+    /* Get the slot type */
     const ftx_waterfall_t *wf = &mon->wf;
+
     // Find top candidates by Costas sync score and localize them in time and frequency
     ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
     int num_candidates = ftx_find_candidates(wf, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
-
-    // wprintw(trafficW, "Found %d candidates\n", num_candidates);
-    // wrefresh(trafficW);
 
     // Hash table for decoded messages (to check for duplicates)
     int num_decoded = 0;
@@ -946,22 +941,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         float freq_hz = (mon->min_bin + cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
         float time_sec = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
 
-#ifdef WATERFALL_USE_PHASE
-        // int resynth_len = 12000 * 16;
-        // float resynth_signal[resynth_len];
-        // for (int pos = 0; pos < resynth_len; ++pos)
-        // {
-        //     resynth_signal[pos] = 0;
-        // }
-        // monitor_resynth(mon, cand, resynth_signal);
-        // char resynth_path[80];
-        // sprintf(resynth_path, "resynth_%04f_%02.1f.wav", freq_hz, time_sec);
-        // save_wav(resynth_signal, resynth_len, 12000, resynth_path);
-#endif
-
         ftx_message_t message;
         ftx_decode_status_t status;
         if (!ftx_decode_candidate(wf, cand, K_LDPC_ITERS, &message, &status)) {
+            /*
             if (status.ldpc_errors > 0) {
                 LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
                 // wprintw(trafficW, "LDPC decode: %d errors\n", status.ldpc_errors);
@@ -971,61 +954,50 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 // wprintw(trafficW, "CRC mismatch!\n");
                 // wrefresh(trafficW);
             }
+            */
             continue;
         }
 
-        LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
+        // LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
         // wprintw(trafficW, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
         // wrefresh(trafficW);
 
         int idx_hash = message.hash % K_MAX_MESSAGES;
         bool found_empty_slot = false;
         bool found_duplicate = false;
+        int check_idx = idx_hash;
         do {
             if (rx_state.exit_flag)
                 break; /* Abort case, final sig */
 
             if (decoded_hashtable[idx_hash] == NULL) {
-                LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
+                // LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
                 // wprintw(trafficW, "Found an empty slot\n");
 
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
-                LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
+                // LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
                 // wprintw(trafficW, "Found a duplicate!\n");
 
                 found_duplicate = true;
             } else {
-                LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
+                // LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
                 // wprintw(trafficW, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
+
+                if (check_idx == idx_hash)  // We looped around, exit!
+                    found_duplicate = true;
             }
             // wrefresh(trafficW);
 
         } while (!found_empty_slot && !found_duplicate);
 
-        /*
-                if (found_empty_slot) {
-                    // Fill the empty hashtable slot
-                    memcpy(&decoded[idx_hash], &message, sizeof(message));
-                    decoded_hashtable[idx_hash] = &decoded[idx_hash];
-                    ++num_decoded;
+        if (found_duplicate)
+            // Skip this message
+            continue;
 
-                    char text[FTX_MAX_MESSAGE_LENGTH];
-                    ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
-                    if (unpack_status != FTX_MESSAGE_RC_OK) {
-                        snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);
-                    }
-
-                    // Fake WSJT-X-like output for now
-                    float snr = cand->score * 0.5f;  // TODO: compute better approximation of SNR
-                    printf("%02d%02d%02d %+05.1f %+4.2f %4.0f ~  %s\n",
-                           tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
-                           snr, time_sec, freq_hz, text);
-                }
-        */
         /* Add this entry to an empty hashtable slot */
         if (found_empty_slot) {
             char msgToLog[FTX_MAX_MESSAGE_LENGTH];
@@ -1037,9 +1009,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
 
             snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
-
-            // wprintw(trafficW, "Message to print: %s\n", msgToPrint);
-            // wrefresh(trafficW);
 
             char *strPtr = strtok((char *)text, " ");
             // Here if the message is mlformed strtok will return NULL, this needs to be handled
@@ -1058,16 +1027,12 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             }
 
             // We have a real message now, strPtr points to the first non-space char
+            struct plain_message qsoMsg;
 
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
-                struct plain_message qsoMsg;
-
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
 
-                pthread_mutex_lock(&msglock);  // Protect decodes structure
-
-                sprintf(decodes[num_decoded].cmd, "CQ   ");
                 // If what follows CQ is 2 chars then we keep it in CQ command
                 if (2 == strlen(strPtr)) {
                     sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
@@ -1080,15 +1045,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 }
                 */
 
-                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
+                snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
-                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
-
-                decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-                decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
-                decodes[num_decoded].tempus = current_time;
-
-                pthread_mutex_unlock(&msglock);
+                snprintf(qsoMsg.loc, sizeof(qsoMsg.loc), "%s", strPtr);
 
                 /* Feed the QSO Handler machine */
                 snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
@@ -1098,18 +1057,11 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
                 qsoMsg.tempus = current_time;
 
-                pthread_mutex_lock(&QSOHlock);
-                qsoh_queue.push_back(qsoMsg);
-                pthread_mutex_unlock(&QSOHlock);
-
-                num_decoded++;
             } else
             // This is not a CQ, the first string is the destination
             {
                 // Check if this is for us, in such case this will initiate a QSO
                 if (!strncmp(strPtr, dec_options.rcall, strlen(dec_options.rcall))) {
-                    struct plain_message qsoMsg;
-
                     char *dst = strPtr;
                     char *src = strtok(NULL, " ");
                     char *msg = strtok(NULL, " \n");
@@ -1122,13 +1074,33 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                     qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
                     qsoMsg.tempus = current_time;
-
-                    /* Feed the QSO Handler machine */
-                    pthread_mutex_lock(&QSOHlock);
-                    qsoh_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOHlock);
                 }
             }
+
+            /* Feed the QSO Handler machine */
+            pthread_mutex_lock(&QSOHlock);
+            qsoh_queue.push_back(qsoMsg);
+            pthread_mutex_unlock(&QSOHlock);
+
+            pthread_mutex_lock(&msglock);  // Protect decodes structure
+
+            sprintf(decodes[num_decoded].cmd, "CQ   ");
+
+            snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", qsoMsg.src);
+            snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", qsoMsg.loc);
+
+            decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
+            decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
+            decodes[num_decoded].tempus = current_time;
+            num_decoded++;
+
+            pthread_mutex_unlock(&msglock);
+
+            /* CQlock */
+            pthread_mutex_lock(&CQlock);  // Protect CQ queue
+            cq_queue.push_back(decodes[num_decoded]);
+            pthread_mutex_unlock(&CQlock);  // Protect decodes structure
+
             // In any case we will log the message
             struct plain_message logMsg;
 
@@ -1148,10 +1120,6 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             log_queue.push_back(logMsg);
 
             pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
-
-            // wprintw(trafficW, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
-
-            // wrefresh(trafficW);
         }
     }
     // LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);

@@ -54,7 +54,7 @@ extern std::vector<struct plain_message> qso_queue;
 extern std::vector<struct plain_message> log_queue;
 extern std::vector<struct tick_message> tick_queue;
 extern std::vector<struct plain_message> qsoh_queue;
-extern pthread_mutex_t CQlock;
+// extern pthread_mutex_t CQlock;
 extern pthread_mutex_t QSOlock;
 extern pthread_mutex_t LOGlock;
 extern pthread_mutex_t Ticklock;
