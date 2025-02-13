@@ -1031,6 +1031,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             if (!strncmp(strPtr, "CQ", 2)) {  // Only get the CQ messages
 
+                sprintf(qsoMsg.dest, "CQ");
+
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
 
                 // If what follows CQ is 2 chars then we keep it in CQ command
@@ -1038,24 +1040,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     sprintf(decodes[num_decoded].cmd, "CQ %s", strPtr);
                     strPtr = strtok(NULL, " ");  // Move on the Callsign part
                 }
-                /*
-                if (!strncmp(strPtr, "DX", 2)) {
-                    sprintf(decodes[num_decoded].cmd, "CQ DX");
-                    strPtr = strtok(NULL, " ");  // Move on the Callsign part
-                }
-                */
 
                 snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", strPtr);
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(qsoMsg.loc, sizeof(qsoMsg.loc), "%s", strPtr);
-
-                /* Feed the QSO Handler machine */
-                snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
-                sprintf(qsoMsg.dest, "CQ");
-                qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
-                qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-                qsoMsg.tempus = current_time;
 
             } else
             // This is not a CQ, the first string is the destination
@@ -1068,14 +1056,14 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
                     snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg);
-
-                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
-
-                    qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
-                    qsoMsg.tempus = current_time;
                 }
             }
+
+            /* Feed the QSO Handler machine */
+            qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
+            qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
+            qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+            qsoMsg.tempus = current_time;
 
             /* Feed the QSO Handler machine */
             pthread_mutex_lock(&QSOHlock);
