@@ -981,26 +981,30 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
         int idx_hash = message.hash % K_MAX_MESSAGES;
         bool found_empty_slot = false;
         bool found_duplicate = false;
+        int check_idx = idx_hash;
         do {
             if (rx_state.exit_flag)
                 break; /* Abort case, final sig */
 
             if (decoded_hashtable[idx_hash] == NULL) {
-                LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
+                // LOG(LOG_DEBUG, "Decoded Found an empty slot\n");
                 // wprintw(trafficW, "Found an empty slot\n");
 
                 found_empty_slot = true;
             } else if ((decoded_hashtable[idx_hash]->hash == message.hash) && (0 == memcmp(decoded_hashtable[idx_hash]->payload, message.payload, sizeof(message.payload)))) {
-                LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
+                // LOG(LOG_DEBUG, "Decoded Found a duplicate!\n");
                 // wprintw(trafficW, "Found a duplicate!\n");
 
                 found_duplicate = true;
             } else {
-                LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
+                // LOG(LOG_DEBUG, "Decoded Hash table clash!\n");
                 // wprintw(trafficW, "Hash table clash!\n");
 
                 // Move on to check the next entry in hash table
                 idx_hash = (idx_hash + 1) % K_MAX_MESSAGES;
+
+                if (check_idx == idx_hash)  // We looped around, exit!
+                    found_duplicate = true;
             }
             // wrefresh(trafficW);
 
