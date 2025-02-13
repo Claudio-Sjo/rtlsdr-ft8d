@@ -117,6 +117,9 @@ pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 const char *rtlsdr_ft8d_version = "0.7.0";
 char pskreporter_app_version[] = "rtlsdr-ft8d_v0.7.0";
 
+static volatile int callback_counter = 0;
+static volatile int callback_cnt_old = 0;
+
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
     int8_t *sigIn = (int8_t *)samples;
@@ -243,6 +246,7 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
             rx_state.iqIndex[idx]++;
         }
     }
+    callback_counter++;
 }
 
 static void sigint_callback_handler(int signum) {
@@ -1613,8 +1617,10 @@ int main(int argc, char **argv) {
 
         usleep(100000); /* Give a chance to the other thread to update the nloop counter */
 
-// Test!!!
-        pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+        // Test!!!
+        if (callback_counter == callback_cnt_old)
+            pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+        callback_cnt_old = callback_counter;
     }
 
     /* Stop the decoder thread */
