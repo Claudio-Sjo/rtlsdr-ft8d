@@ -392,8 +392,7 @@ inline uint32_t SwapEndian32(uint32_t val) {
     return (val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24);
 }
 
-bool exitFlag(void)
-{
+bool exitFlag(void) {
     return (rx_state.exit_flag == true);
 }
 
@@ -1613,6 +1612,9 @@ int main(int argc, char **argv) {
         // safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
 
         usleep(100000); /* Give a chance to the other thread to update the nloop counter */
+
+// Test!!!
+        pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     }
 
     /* Stop the decoder thread */
