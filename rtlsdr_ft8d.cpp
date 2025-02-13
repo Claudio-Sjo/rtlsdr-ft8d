@@ -1084,23 +1084,24 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             pthread_mutex_lock(&msglock);  // Protect decodes structure
 
-            sprintf(decodes[num_decoded].cmd, "CQ   ");
+            if (!strncmp(qsoMsg.dest, "CQ", 2)) {
+                sprintf(decodes[num_decoded].cmd, "CQ   ");
 
-            snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", qsoMsg.src);
-            snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", qsoMsg.loc);
+                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", qsoMsg.src);
+                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", qsoMsg.loc);
 
-            decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-            decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
-            decodes[num_decoded].tempus = current_time;
-            num_decoded++;
+                decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
+                decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].tempus = current_time;
 
-            pthread_mutex_unlock(&msglock);
+                pthread_mutex_unlock(&msglock);
 
-            /* CQlock */
-            pthread_mutex_lock(&CQlock);  // Protect CQ queue
-            cq_queue.push_back(decodes[num_decoded]);
-            pthread_mutex_unlock(&CQlock);  // Protect decodes structure
-
+                /* CQlock */
+                pthread_mutex_lock(&CQlock);  // Protect CQ queue
+                cq_queue.push_back(decodes[num_decoded]);
+                pthread_mutex_unlock(&CQlock);  // Protect decodes structure
+                num_decoded++;
+            }
             // In any case we will log the message
             struct plain_message logMsg;
 
