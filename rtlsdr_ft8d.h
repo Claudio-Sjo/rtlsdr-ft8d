@@ -192,3 +192,6 @@ void disableReporting(void);
 bool getReportingStatus(void);
 void programQuit(void);
 bool exitFlag(void);
+
+void closeRtlDevice(void);
+bool startRtlDevice(char *resultText);

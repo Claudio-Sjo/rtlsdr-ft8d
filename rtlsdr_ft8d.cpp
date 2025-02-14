@@ -1173,6 +1173,76 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     pthread_mutex_unlock(&Ticklock);
 }
 
+void closeRtlDevice(void) {
+    if (rtl_device)
+        rtlsdr_close(rtl_device);
+}
+
+bool startRtlDevice(char *resultText) {
+    int rtl_count = 0;
+    int rtl_result = 0;
+
+    rtl_count = rtlsdr_get_device_count();
+    if (!rtl_count) {
+        sprintf(resultText, "Device crashed\n");
+        return false;
+    }
+    rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot open device\n");
+        return false;
+    }
+    if (rx_options.autogain)
+        rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
+    else
+        rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot set gain\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    if (rx_options.directsampling)
+        rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot set direct sampling\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);  // >= 0
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot set sampling rate\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    if (rx_options.ppm != 0)
+        rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot set frequency correction\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot set center frequency\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    rtl_result = rtlsdr_reset_buffer(rtl_device);
+    if (rtl_result < 0) {
+        sprintf(resultText, "Cannot reset device buffer\n");
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+        return false;
+    }
+    pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+    return true;
+}
+
 void usage(FILE *stream, int32_t status) {
     fprintf(stream,
             "rtlsdr_ft8d, a simple FT8 daemon for RTL receivers\n\n"
@@ -1620,78 +1690,17 @@ int main(int argc, char **argv) {
         // Test!!!
         if (callback_counter == callback_cnt_old) {
             /* Try to restart the device */
-            rtl_count = rtlsdr_get_device_count();
-            if (!rtl_count) {
-                wprintw(trafficW, "Device crashed\n");
+            char errorTxt[32];
+
+            if (!startRtlDevice(errorTxt)) {
+                wprintw(trafficW, "%s\n", errorTxt);
                 wrefresh(trafficW);
                 rx_state.exit_flag = true;
                 sleep(3);
             }
-            if (rtl_count) {
-                rtl_result = rtlsdr_open(&rtl_device, rx_options.device);  // >= 0
-                if (rtl_result < 0) {
-                    wprintw(trafficW, "Cannot open device\n");
-                    rx_state.exit_flag = true;
-                }
-                if (!rx_state.exit_flag) {
-                    if (rx_options.autogain)
-                        rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
-                    else
-                        rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot set gain\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-                if (!rx_state.exit_flag) {
-                    if (rx_options.directsampling)
-                        rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot set direct sampling\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-                if (!rx_state.exit_flag) {
-                    rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);  // >= 0
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot set sampling rate\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-                if (!rx_state.exit_flag) {
-                    if (rx_options.ppm != 0)
-                        rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot set frequency correction\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-                if (!rx_state.exit_flag) {
-                    rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot set center frequency\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-                if (!rx_state.exit_flag) {
-                    rtl_result = rtlsdr_reset_buffer(rtl_device);
-                    if (rtl_result < 0) {
-                        wprintw(trafficW, "Cannot reset device buffer\n");
-                        rx_state.exit_flag = true;
-                    }
-                }
-            }
-            if (rx_state.exit_flag) {
-                if (rtl_device)
-                    rtlsdr_close(rtl_device);
-
-                wrefresh(trafficW);
-                sleep(3);
-            } else
-                pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
         }
         callback_cnt_old = callback_counter;
-    }
+    }  // While
 
     /* Stop the decoder thread */
     rx_state.exit_flag = true;
