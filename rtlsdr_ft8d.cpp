@@ -1500,89 +1500,15 @@ int main(int argc, char **argv) {
     signal(SIGABRT, &sigint_callback_handler);
 
     /* Init & parameter the device */
-    rtl_count = rtlsdr_get_device_count();
-    if (!rtl_count) {
-        wprintw(trafficW, "No supported devices found\n");
+    char rtlDevResult[32];
+
+    if (!startRtlDevice(rtlDevResult)) {
+        wprintw(trafficW, "%s\n", rtlDevResult);
         wrefresh(trafficW);
+        sleep(3);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 
-    wprintw(trafficW, "Found %d device(s):\n", rtl_count);
-    for (uint32_t i = 0; i < rtl_count; i++) {
-        rtlsdr_get_device_usb_strings(i, rtl_vendor, rtl_product, rtl_serial);
-        wprintw(trafficW, "  %d:  %s, %s, SN: %s\n", i, rtl_vendor, rtl_product, rtl_serial);
-    }
-
-    wprintw(trafficW, "\nUsing device %d: %s\n", rx_options.device, rtlsdr_get_device_name(rx_options.device));
-    wrefresh(trafficW);
-
-    rtl_result = rtlsdr_open(&rtl_device, rx_options.device);
-    if (rtl_result < 0) {
-        wprintw(trafficW, "ERROR: Failed to open rtlsdr device #%d.\n", rx_options.device);
-        return exit_ft8(rx_options.qso, EXIT_FAILURE);
-    }
-
-    if (rx_options.directsampling) {
-        rtl_result = rtlsdr_set_direct_sampling(rtl_device, rx_options.directsampling);
-        if (rtl_result < 0) {
-            wprintw(trafficW, "ERROR: Failed to set direct sampling\n");
-            rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso, EXIT_FAILURE);
-        }
-    }
-
-    rtl_result = rtlsdr_set_sample_rate(rtl_device, SAMPLING_RATE);
-    if (rtl_result < 0) {
-        wprintw(trafficW, "ERROR: Failed to set sample rate\n");
-        rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso, EXIT_FAILURE);
-    }
-
-    rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 1);
-    if (rtl_result < 0) {
-        wprintw(trafficW, "ERROR: Failed to enable manual gain\n");
-        rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso, EXIT_FAILURE);
-    }
-
-    if (rx_options.autogain) {
-        rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
-        if (rtl_result != 0) {
-            wprintw(trafficW, "ERROR: Failed to set tuner gain\n");
-            rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso, EXIT_FAILURE);
-        }
-    } else {
-        rtl_result = rtlsdr_set_tuner_gain(rtl_device, rx_options.gain);
-        if (rtl_result != 0) {
-            wprintw(trafficW, "ERROR: Failed to set tuner gain\n");
-            rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso, EXIT_FAILURE);
-        }
-    }
-
-    if (rx_options.ppm != 0) {
-        rtl_result = rtlsdr_set_freq_correction(rtl_device, rx_options.ppm);
-        if (rtl_result < 0) {
-            wprintw(trafficW, "ERROR: Failed to set ppm error\n");
-            rtlsdr_close(rtl_device);
-            return exit_ft8(rx_options.qso, EXIT_FAILURE);
-        }
-    }
-
-    rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
-    if (rtl_result < 0) {
-        wprintw(trafficW, "ERROR: Failed to set frequency\n");
-        rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso, EXIT_FAILURE);
-    }
-
-    rtl_result = rtlsdr_reset_buffer(rtl_device);
-    if (rtl_result < 0) {
-        wprintw(trafficW, "ERROR: Failed to reset buffers.\n");
-        rtlsdr_close(rtl_device);
-        return exit_ft8(rx_options.qso, EXIT_FAILURE);
-    }
 
     /* Time alignment & info */
     struct timeval lTime;
