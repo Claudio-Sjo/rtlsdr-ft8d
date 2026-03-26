@@ -72,7 +72,7 @@ int main(int argc, char const* argv[])
 
     FT8Msg Txletter, Rxletter;
 
-    sprintf(Txletter.ft8Message,"SK150LM JO99 20m 30m");
+    sprintf(Txletter.ft8Message,"SK150LM JO99 10 20m 30m");
     Txletter.type = SEND_WSPR;
 
     if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
