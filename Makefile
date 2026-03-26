@@ -21,7 +21,7 @@ OBJSFT8D = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/
 OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o stoargc.o mailbox.o
 
 
-TARGETS = rtlsdr_ft8d ft8 client
+TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon
 
 .PHONY: all clean
 
@@ -44,6 +44,9 @@ ft8: $(OBJSFTX)
 
 cient: client.c
 	client.o -o client $(LIBS)
+
+sk150lm_beacon : sk150lm_beacon.c
+	sk150lm_beacon.o -o sk150lm_beacon $(LIBS)
 
 clean:
 	rm -f *.o ft8_lib/ft8/*.o $(TARGETS) fftw_wisdom.dat selftest.iq
