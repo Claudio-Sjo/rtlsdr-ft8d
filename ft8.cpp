@@ -73,7 +73,7 @@ extern "C" {
 }
 #endif /* __cplusplus */
 
-#define PROGRAM "FT8/Wspr Transmitter Service v 0.3 2023-11-17"
+#define PROGRAM "FT8/Wspr Transmitter Service v 0.4 2026-03-26"
 
 // Note on accessing memory in RPi:
 //
@@ -2158,6 +2158,13 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvBegin);
                 std::cout << std::endl;
 
+                FT8Msg Txletter;
+
+                Txletter.type = CHANGE_RTX_STATE;
+                Txletter.RTXstate = true;
+                sprintf(Txletter.ft8Message, "Transmitting...\n");
+                send(new_socket, &Txletter, sizeof(Txletter), 0);
+                
                 struct timeval sym_start;
                 struct timeval diff;
                 int bufPtr = 0;
@@ -2186,7 +2193,12 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvEnd);
                 timeval_subtract(&tvDiff, &tvEnd, &tvBegin);
                 printf(" (%ld.%03ld s)\n", tvDiff.tv_sec, (tvDiff.tv_usec + 500) / 1000);
-
+                
+                Txletter.type = CHANGE_RTX_STATE;
+                Txletter.RTXstate = false;
+                sprintf(Txletter.ft8Message, "End of transmission...\n");
+                send(new_socket, &Txletter, sizeof(Txletter), 0);
+                
             } else {
                 std::cout << "  Skipping transmission" << std::endl;
                 usleep(1000000);
