@@ -42,12 +42,6 @@ rtlsdr_ft8d: $(OBJSFT8D)
 ft8: $(OBJSFTX)
 	$(CXX) -o $@ $^ $(LIBS)
 
-cient: client.c
-	client.o -o client $(LIBS)
-
-sk150lm_beacon : sk150lm_beacon.c
-	sk150lm_beacon.o -o sk150lm_beacon $(LIBS)
-
 clean:
 	rm -f *.o ft8_lib/ft8/*.o $(TARGETS) fftw_wisdom.dat selftest.iq
 
