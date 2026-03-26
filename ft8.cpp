@@ -532,7 +532,7 @@ int main(const int argc, char *const argv[]) {
             case SEND_WSPR:
                 wordexp(Rxletter.ft8Message, &params, WRDE_DOOFFS);
                 Txletter.type = SEND_ACK;
-                sprintf(Txletter.ft8Message, "SEND_F8_REQ");
+                sprintf(Txletter.ft8Message, "SEND_WSPR_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
                 // mainFT8(argnumber, argvalue);
                 mainWSPR(params.we_wordc, params.we_wordv);
