@@ -73,7 +73,7 @@ int main(int argc, char const* argv[])
     FT8Msg Txletter, Rxletter;
 
     sprintf(Txletter.ft8Message,"WSPR 20m SK150LM JO99");
-    Txletter.type = SEND_F8_REQ;
+    Txletter.type = SEND_WSPR;
 
     if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");
