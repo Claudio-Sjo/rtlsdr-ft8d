@@ -2016,6 +2016,7 @@ int mainWSPR(const int argc, char *const argv[]) {
     double test_tone;
     bool no_delay;
     mode_type mode;
+    bool txbegin = true;
     int terminate;
     parse_commandline_wspr(
         argc,
@@ -2158,12 +2159,15 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvBegin);
                 std::cout << std::endl;
 
-                FT8Msg Txletter;
+                if (txbegin == true) {
+                    FT8Msg Txletter;
 
-                Txletter.type = CHANGE_RTX_STATE;
-                Txletter.RTXstate = true;
-                sprintf(Txletter.ft8Message, "Transmitting...\n");
-                send(new_socket, &Txletter, sizeof(Txletter), 0);
+                    Txletter.type = CHANGE_RTX_STATE;
+                    Txletter.RTXstate = true;
+                    sprintf(Txletter.ft8Message, "Transmitting...\n");
+                    send(new_socket, &Txletter, sizeof(Txletter), 0);
+                    txbegin = false;
+                }
                 
                 struct timeval sym_start;
                 struct timeval diff;
@@ -2193,12 +2197,7 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvEnd);
                 timeval_subtract(&tvDiff, &tvEnd, &tvBegin);
                 printf(" (%ld.%03ld s)\n", tvDiff.tv_sec, (tvDiff.tv_usec + 500) / 1000);
-                
-                Txletter.type = CHANGE_RTX_STATE;
-                Txletter.RTXstate = false;
-                sprintf(Txletter.ft8Message, "End of transmission...\n");
-                send(new_socket, &Txletter, sizeof(Txletter), 0);
-                
+              
             } else {
                 std::cout << "  Skipping transmission" << std::endl;
                 usleep(1000000);
@@ -2213,6 +2212,13 @@ int mainWSPR(const int argc, char *const argv[]) {
                 break;
             }
         }
+        FT8Msg Txletter;
+        
+        Txletter.type = CHANGE_RTX_STATE;
+        Txletter.RTXstate = false;
+        sprintf(Txletter.ft8Message, "End of transmission...\n");
+        send(new_socket, &Txletter, sizeof(Txletter), 0);
+        
     }
 
     return 0;
