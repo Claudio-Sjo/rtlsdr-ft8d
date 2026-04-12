@@ -19,7 +19,8 @@ endif
 
 OBJSFT8D = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o
 OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o stoargc.o mailbox.o
-
+OBJCLI = client.o
+OBJSK  = sk150lm_beacon.o
 
 TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon
 
@@ -41,6 +42,14 @@ rtlsdr_ft8d: $(OBJSFT8D)
 
 ft8: $(OBJSFTX)
 	$(CXX) -o $@ $^ $(LIBS)
+
+client: $(OBJCLI)
+	$(CXX) -o $@ $^ $(LIBS)
+
+
+sk150lm_beacon: $(OBJSK)
+	$(CXX) -o $@ $^ $(LIBS)
+
 
 clean:
 	rm -f *.o ft8_lib/ft8/*.o $(TARGETS) fftw_wisdom.dat selftest.iq
