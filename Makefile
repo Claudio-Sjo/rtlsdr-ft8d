@@ -4,12 +4,29 @@ CFLAGS= -O3 -std=gnu17 -g -I./ft8_lib -I.
 CXXFLAGS= -O3 -x c++ -g -I./ft8_lib -I.
 LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 
-ifeq ($(findstring armv6,$(shell uname -m)),armv6)
+#ifeq ($(findstring armv6,$(shell uname -m)),armv6)
 # Broadcom BCM2835 SoC with 700 MHz 32-bit ARM 1176JZF-S (ARMv6 arch)
-PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
-else
+#PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
+#else
 # Broadcom BCM2836 SoC with 900 MHz 32-bit quad-core ARM Cortex-A7  (ARMv7 arch)
 # Broadcom BCM2837 SoC with 1.2 GHz 64-bit quad-core ARM Cortex-A53 (ARMv8 arch)
+#PI_VERSION = -DRPI23
+#endif
+
+# Identify Raspbery Pi Version
+
+CPUINFO := $(shell cat /proc/cpuinfo)
+
+ifeq ($(findstring ARMv6,$(CPUINFO)),ARMv6)
+# Raspberry Pi 1
+PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
+
+else ifneq ($(findstring Cortex-A72,$(CPUINFO)),)
+# Raspberry Pi 4
+PI_VERSION = -DRPI4 -mcpu=cortex-a72
+
+else
+# Raspberry Pi 2 / 3
 PI_VERSION = -DRPI23
 endif
 
