@@ -22,8 +22,12 @@ ifeq ($(findstring ARMv6,$(CPUINFO)),ARMv6)
 PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
 
 else ifneq ($(findstring Cortex-A72,$(CPUINFO)),)
-# Raspberry Pi 4
+# Raspberry Pi 4 (32-bit OS)
 PI_VERSION = -DRPI4 -mcpu=cortex-a72
+
+else ifneq ($(findstring 0xd08,$(CPUINFO)),)
+# Raspberry Pi 4 (64-bit OS, CPU part 0xd08 = Cortex-A72)
+PI_VERSION = -DRPI4
 
 else
 # Raspberry Pi 2 / 3
