@@ -51,6 +51,9 @@ all: $(TARGETS)
 %.o: %.c
 	${CC} ${CFLAGS} $(PI_VERSION) -c $< -o $@
 
+ft8_lib/%.o: ft8_lib/%.c
+	${CC} ${CFLAGS} $(PI_VERSION) -Wno-format -c $< -o $@
+
 %.o: %.cpp
 	${CXX} ${CXXFLAGS} $(PI_VERSION) -c $< -o $@
 

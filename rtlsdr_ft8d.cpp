@@ -498,8 +498,6 @@ void webClusterSpots(uint32_t n_results) {
 
     CURL *curl;
     CURLcode res;
-    struct curl_httppost *post = NULL;
-    struct curl_httppost *last = NULL;
 
     char myCall[16];
     char dxCall[12];
@@ -513,22 +511,36 @@ void webClusterSpots(uint32_t n_results) {
         snprintf(info, sizeof(info), "M2M FT8 [%s - %s]", dec_options.rloc, dec_results[i].loc);
 
         curl_global_init(CURL_GLOBAL_ALL);
-        curl_formadd(&post, &last, CURLFORM_COPYNAME, "_mycall", CURLFORM_COPYCONTENTS, myCall, CURLFORM_END);
-        curl_formadd(&post, &last, CURLFORM_COPYNAME, "_dxcall", CURLFORM_COPYCONTENTS, dxCall, CURLFORM_END);
-        curl_formadd(&post, &last, CURLFORM_COPYNAME, "_freq", CURLFORM_COPYCONTENTS, dxFreq, CURLFORM_END);
-        curl_formadd(&post, &last, CURLFORM_COPYNAME, "_info", CURLFORM_COPYCONTENTS, info, CURLFORM_END);
-
         curl = curl_easy_init();
         if (curl) {
+            curl_mime *mime = curl_mime_init(curl);
+            curl_mimepart *part;
+
+            part = curl_mime_addpart(mime);
+            curl_mime_name(part, "_mycall");
+            curl_mime_data(part, myCall, CURL_ZERO_TERMINATED);
+
+            part = curl_mime_addpart(mime);
+            curl_mime_name(part, "_dxcall");
+            curl_mime_data(part, dxCall, CURL_ZERO_TERMINATED);
+
+            part = curl_mime_addpart(mime);
+            curl_mime_name(part, "_freq");
+            curl_mime_data(part, dxFreq, CURL_ZERO_TERMINATED);
+
+            part = curl_mime_addpart(mime);
+            curl_mime_name(part, "_info");
+            curl_mime_data(part, info, CURL_ZERO_TERMINATED);
+
             curl_easy_setopt(curl, CURLOPT_URL, "http://mycluster.localhost/sends.php");
-            curl_easy_setopt(curl, CURLOPT_HTTPPOST, post);
+            curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
             res = curl_easy_perform(curl);
 
             if (res != CURLE_OK)
                 fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 
+            curl_mime_free(mime);
             curl_easy_cleanup(curl);
-            curl_formfree(post);
         }
     }
 }
