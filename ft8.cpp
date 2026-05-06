@@ -698,25 +698,25 @@ void txSym(
         // Configure the transmission for this iteration
         // Set GPIO pin to transmit f0
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->SOURCE_AD = (long int)constPage.b + f0_idx * 4;
 
         // Wait for n_f0 PWM clocks
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->TXFR_LEN = n_f0;
 
         // Set GPIO pin to transmit f1
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->SOURCE_AD = (long int)constPage.b + f1_idx * 4;
 
         // Wait for n_f1 PWM clocks
         bufPtr = (bufPtr + 1) % (1024);
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->TXFR_LEN = n_f1;
 
