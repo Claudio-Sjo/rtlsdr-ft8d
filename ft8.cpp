@@ -1378,12 +1378,12 @@ void setup_peri_base_virt(
 int mainFT8(const int argc, char *const argv[]) {
 #ifdef RPI1
     std::cout << "Detected Raspberry Pi version 1" << std::endl;
-#else
-#ifdef RPI23
+#elif defined(RPI23)
     std::cout << "Detected Raspberry Pi version 2/3" << std::endl;
+#elif defined(RPI4)
+    std::cout << "Detected Raspberry Pi version 4" << std::endl;
 #else
 #error "RPI version macro is not defined"
-#endif
 #endif
 
     // Initialize the RNG
