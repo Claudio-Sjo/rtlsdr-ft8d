@@ -151,7 +151,7 @@ extern "C" {
 // 0.16s long. For some reason, despite the use of DMA, the load on the PI
 // affects the TX length of the symbols. However, the varying symbol length is
 // compensated for in the main loop.
-#define F_PWM_CLK_INIT (31156186.6125761 / 0.682 * 0.16)  // TODO?
+#define F_PWM_CLK_INIT (31156186.6125761 / 0.682 * 0.16)
 
 // FT8 nominal symbol time
 #define FT8_SYMTIME (1920.0 / 12000.0)
@@ -840,8 +840,11 @@ void setupDMA(
     // set up a clock for the PWM
     ACCESS_BUS_ADDR(CLK_BUS_BASE + 40 * 4 /*PWMCLK_CNTL*/) = 0x5A000026;  // Source=PLLD and disable
     usleep(1000);
-    // ACCESS_BUS_ADDR(CLK_BUS_BASE + 41*4 /*PWMCLK_DIV*/)  = 0x5A002800;
-    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A002000;   // set PWM div to 2, for 250MHz
+#ifdef RPI4
+    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A003000;   // set PWM div to 3, for 250MHz (750/3)
+#else
+    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A002000;   // set PWM div to 2, for 250MHz (500/2)
+#endif
     ACCESS_BUS_ADDR(CLK_BUS_BASE + 40 * 4 /*PWMCLK_CNTL*/) = 0x5A000016;  // Source=PLLD and enable
     usleep(1000);
 
