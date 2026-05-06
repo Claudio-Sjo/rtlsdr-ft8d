@@ -519,12 +519,13 @@ int main(const int argc, char *const argv[]) {
 
         switch (Rxletter.type) {
             case SEND_F8_REQ:
-                wordexp(Rxletter.ft8Message, &params, WRDE_DOOFFS);
+                wordexp(Rxletter.ft8Message, &params, 0);
                 Txletter.type = SEND_ACK;
                 sprintf(Txletter.ft8Message, "SEND_F8_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
-                // mainFT8(argnumber, argvalue);
+                optind = 1;
                 mainFT8(params.we_wordc, params.we_wordv);
+                wordfree(&params);
                 cleanup();
                 break;
             case TEST_SEND:
@@ -534,12 +535,13 @@ int main(const int argc, char *const argv[]) {
                 handleSendTx(new_socket);
                 break;
             case SEND_WSPR:
-                wordexp(Rxletter.ft8Message, &params, WRDE_DOOFFS);
+                wordexp(Rxletter.ft8Message, &params, 0);
                 Txletter.type = SEND_ACK;
                 sprintf(Txletter.ft8Message, "SEND_WSPR_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
-                // mainFT8(argnumber, argvalue);
+                optind = 1;
                 mainWSPR(params.we_wordc, params.we_wordv);
+                wordfree(&params);
                 cleanup();
                 break;
             default:
