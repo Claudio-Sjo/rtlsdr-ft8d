@@ -13,6 +13,7 @@
 #include <time.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 #include <rtlsdr_ft8d.h>
 #include <ft8tx/FT8Types.h>
@@ -296,12 +297,16 @@ int txStatusFlag;
 
 void *TXHandler(void *vargp) {
     int status, valread, client_fd;
-    struct sockaddr serv_addr = {AF_UNIX, SOCKNAME};
+    struct sockaddr_un serv_addr;
 
     FT8Msg Txletter, Rxletter;
     char key = 0;
 
     txStatusFlag = TX_IDLE;
+
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, SOCKNAME, sizeof(serv_addr.sun_path) - 1);
 
     while (exitTxThread == false) {
         if (tx_queue.size()) {

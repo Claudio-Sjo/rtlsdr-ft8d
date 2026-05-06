@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 /* Application specific include files */
@@ -68,9 +69,13 @@
 int main(int argc, char const* argv[])
 {
     int status, valread, client_fd;
-    struct sockaddr serv_addr  = {AF_UNIX, SOCKNAME};
+    struct sockaddr_un serv_addr;
 
     FT8Msg Txletter, Rxletter;
+
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, SOCKNAME, sizeof(serv_addr.sun_path) - 1);
 
     sprintf(Txletter.ft8Message,"FT8Tx SK150LM JO99 10 20m 30m");
     Txletter.type = SEND_WSPR;

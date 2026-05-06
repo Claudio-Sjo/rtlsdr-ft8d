@@ -404,7 +404,7 @@ void cleanupAndExit(int sig) {
 
 int main(const int argc, char *const argv[]) {
     int server_fd, valread;
-    struct sockaddr address = {AF_UNIX, SOCKNAME};
+    struct sockaddr_un address;
     char mode[] = "0777";
 
     struct sigaction act;
@@ -415,6 +415,10 @@ int main(const int argc, char *const argv[]) {
     char **argvalue;
 
     fd_set readfds; /* Flag for select()     */
+
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    strncpy(address.sun_path, SOCKNAME, sizeof(address.sun_path) - 1);
 
     printf("%s\n\n", PROGRAM);
 
