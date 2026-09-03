@@ -46,6 +46,7 @@
 #include <rtlsdr_ft8d.h>
 #include <ft8tx/FT8Types.h>
 #include <qsoHandler.h>
+#include <tsqueue.h>
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -102,10 +103,13 @@ void createADIheader(void) {
     time_t current_time = time(NULL);
 
     const char *homeDir = getenv("HOME");
+    if (homeDir == NULL)
+        homeDir = ".";  /* Fall back to CWD if HOME is unset */
 
     // Convert the time to a string using the desired format
     char date_string[20];
-    strftime(date_string, 20, "%Y-%m-%d", localtime(&current_time));
+    struct tm tmv;
+    strftime(date_string, 20, "%Y-%m-%d", localtime_r(&current_time, &tmv));
 
     sprintf(adiFileName, "%s%s%s.adi", homeDir, qsoDir, date_string);
     LOG(LOG_DEBUG, "adiFileName is %s\n", adiFileName);
@@ -116,6 +120,10 @@ void createADIheader(void) {
         // The file doesn't exist, we need to create and populate it
         // adiFile = fopen(adiFileName, "w");
         adiFile = fopen(adiFileName, "a");
+        if (adiFile == NULL) {  /* ~/ft8QSOdir may not exist */
+            LOG(LOG_ERROR, "createADIheader: cannot open %s\n", adiFileName);
+            return;
+        }
         fprintf(adiFile, "<PROGRAMID:11>rtlsdr-ft8d<PROGRAMVERSION:5>%s<ADIF_VER:5>3.1.3\n<EOH>\n\n", rtlsdr_ft8d_version);
         fclose(adiFile);
     }
@@ -124,11 +132,16 @@ void createADIheader(void) {
 void logToAdi(struct plain_message *completedQSO) {
     FILE *adiFile;
     struct tm *timeinfo;
+    struct tm timeinfov;
     char buff[32];
 
     adiFile = fopen(adiFileName, "a");
+    if (adiFile == NULL) {  /* ~/ft8QSOdir may not exist -- avoid NULL deref */
+        LOG(LOG_ERROR, "logToAdi: cannot open %s\n", adiFileName);
+        return;
+    }
     fprintf(adiFile, "<CALL:%zu>%s", strlen(completedQSO->src), completedQSO->src);  // CallId
-    timeinfo = localtime(&completedQSO->tempus);
+    timeinfo = localtime_r(&completedQSO->tempus, &timeinfov);
     fprintf(adiFile, "<TIME_ON:6>%02d%02d%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);                 // Time
     fprintf(adiFile, "<QSO_DATE_OFF:8>%d%02d%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);  // Date
 
@@ -174,10 +187,15 @@ void logQSO(struct plain_message *completedQSO) {
     char qsoLogFileName[] = "QSOLOG.txt";
     FILE *qsoLogFile;
     char timeBuff[20];
+    struct tm tmv;
 
     qsoLogFile = fopen(qsoLogFileName, "a");
+    if (qsoLogFile == NULL) {
+        LOG(LOG_ERROR, "logQSO: cannot open %s\n", qsoLogFileName);
+        return;
+    }
 
-    strftime(timeBuff, 20, "%Y-%m-%d %H:%M:%S", localtime(&completedQSO->tempus));
+    strftime(timeBuff, 20, "%Y-%m-%d %H:%M:%S", localtime_r(&completedQSO->tempus, &tmv));
 
     fprintf(qsoLogFile, "%s %d %02d %s %s \n", timeBuff, completedQSO->freq, completedQSO->snr, completedQSO->src, completedQSO->dest);
 
@@ -204,7 +222,7 @@ bool checkPeer(char *thePeer) {
     uint32_t theHash = hashCallId(thePeer);
 
     for (uint32_t i = 0; i < peersIdx; i++)
-        if (peers[peersIdx] == theHash)
+        if (peers[i] == theHash)  /* was peers[peersIdx] -- never matched */
             return true;
 
     return false;
@@ -216,7 +234,7 @@ bool addPeer(char *newPeer) {
 
     peers[peersIdx] = hashCallId(newPeer);
     peersIdx++;
-    if (peersIdx > MAXQSOPEERS)
+    if (peersIdx >= MAXQSOPEERS)  /* was >, allowing a write to peers[MAXQSOPEERS] */
         peersIdx = 0;
     return true;
 }
@@ -226,9 +244,7 @@ void queueTx(char *txString) {
 
     sprintf(Txletter.ft8Message, "%s", txString);
 
-    pthread_mutex_lock(&TXlock);  // Protect key queue structure
-    tx_queue.push_back(Txletter);
-    pthread_mutex_unlock(&TXlock);  // Protect key queue structure
+    tsq_push(tx_queue, &TXlock, Txletter);
 }
 
 /* This function handles the Tx task of the state machine
@@ -258,9 +274,7 @@ bool handleTx(ft8slot_t txSlot) {
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", dec_options.rloc);
 
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                    tsq_push(qso_queue, &QSOlock, qsoMsg);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
                     break;
                 case replySig:
@@ -273,9 +287,7 @@ bool handleTx(ft8slot_t txSlot) {
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", theLevel);
 
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                    tsq_push(qso_queue, &QSOlock, qsoMsg);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -285,9 +297,7 @@ bool handleTx(ft8slot_t txSlot) {
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "RR73");
 
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                    tsq_push(qso_queue, &QSOlock, qsoMsg);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -298,9 +308,7 @@ bool handleTx(ft8slot_t txSlot) {
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "73");
 
-                    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-                    qso_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+                    tsq_push(qso_queue, &QSOlock, qsoMsg);
                     LOG(LOG_DEBUG, "handleTx Transmitting %s\n", theMessage);
 
                     break;
@@ -406,9 +414,7 @@ void testCaseExec(ft8slot_t theSlot) {
 
         LOG(LOG_DEBUG, "testCaseExec sent %s\n", testQSO.message);
 
-        pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-        qso_queue.push_back(testQSO);
-        pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+        tsq_push(qso_queue, &QSOlock, testQSO);
 
         usleep(500000); /* Wait 500 msec.*/
 
@@ -619,9 +625,7 @@ void addQso(struct plain_message *newQso) {
         }
     }
 
-    pthread_mutex_lock(&QSOlock);  // Protect decodes structure
-    qso_queue.push_back(*newQso);
-    pthread_mutex_unlock(&QSOlock);  // Protect decodes structure
+    tsq_push(qso_queue, &QSOlock, *newQso);
 }
 
 /* Thi function is called when automatic CQ answer is enabled */
@@ -711,28 +715,19 @@ void *QSOHandler(void *vargp) {
         struct tick_message tickMsg;
 
         /* Wait for the trigger event, this brings the current slot */
-        while (tick_queue.size() == 0) {
+        while (tsq_size(tick_queue, &Ticklock) == 0) {
             if (qsoExit.load() == true)
                 break;      /* Abort case, final sig */
             usleep(100000); /* Wait 100 msec.*/
         }
 
-        while (tick_queue.size()) {
-            pthread_mutex_lock(&Ticklock);
-            tickMsg = tick_queue.front();
-            tick_queue.erase(tick_queue.begin());
-            pthread_mutex_unlock(&Ticklock);
+        while (tsq_pop(tick_queue, &Ticklock, &tickMsg)) {
             // tickMsg.currentSlot;
             ft8tick++;
         }
 
         /* Here we feed the state machine with new data */
-        while (qsoh_queue.size()) {
-            pthread_mutex_lock(&QSOHlock);
-            qsoMsg = qsoh_queue.front();
-            qsoh_queue.erase(qsoh_queue.begin());
-            pthread_mutex_unlock(&QSOHlock);
-
+        while (tsq_pop(qsoh_queue, &QSOHlock, &qsoMsg)) {
             /* Check if it's a CQ or a generic message */
             if (!strcmp(qsoMsg.dest, "CQ"))
                 addCQ(&qsoMsg);

@@ -72,8 +72,7 @@ rtlsdr_ft8d -f 2m -c A1XYZ -l AB12cd -g 29
 
 This is an interactive RTx application allows automatic reporting of FT8 messages on Internet with [PSKreporter](https://pskreporter.info/pskmap.html). The initial idea was to allow a small computer like a Raspberry Pi and a RTL-SDR device to send FT8 reports for [VHF/UHF](https://en.wikipedia.org/wiki/Amateur_radio_frequency_allocations#Very_high_frequencies_and_ultra_high_frequencies) bands. This kind of lightweight setup could run continuously without maintenance and help to get additional propagation reports. This code is just a glue between RTL libs and an FT8 open source library based on [Karlis Goba (YL3JG) work](https://github.com/kgoba/ft8_lib).
 
-The Transmitter is based on Si5351 chip for signal generation and related Power Amplification and filtering, the circuit diagram
-is to be added. Interface between RPi and Si5351 goes via I2C by means of WirePi library.
+The Transmitter exploits the Raspberry Pi's own hardware clock generator for RF signal generation: no external synthesizer chip is used. The carrier is emitted on GPIO4 (GPCLK0), sourced from the on-SoC PLLD clock (500 MHz on RPi2/3, 750 MHz on RPi4), and the 8 FT8 tones are synthesized by dithering the clock's fractional divider through a DMA-driven instruction chain (the rpitx/WsprryPi approach). External low-pass filtering and power amplification on the GPIO4 output are still required for on-air use; the circuit diagram is to be added.
 
 This application written in C does:
 

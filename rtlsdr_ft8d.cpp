@@ -51,6 +51,8 @@
 
 #include <qsoHandler.h>
 
+#include <tsqueue.h>
+
 /* Defines for debug */
 // #define TXWINTEST
 
@@ -313,7 +315,7 @@ static void *decoder(void *arg) {
         time_t unixtime;
         time(&unixtime);
         unixtime = unixtime - 15 + 1;
-        rx_state.gtm = gmtime(&unixtime);
+        gmtime_r(&unixtime, &rx_state.gtm);
 
         /* Search & decode the signal */
         ft8_subsystem(rx_state.iSamples[prevBuffer],
@@ -408,45 +410,41 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *pskUploader(void *vargp) {
     while (exitFlag() == false) {
-        if (dec_results_queue.size() > 0) {
-            int i = 0;
+        /* Wait ~60s between batches, checking the exit flag every second */
+        for (int i = 0; i < 60 && !exitFlag(); i++)
+            sleep(1);
 
-            while (i < 60) {
-                sleep(1);
-                i++;
-                if (exitFlag()) {
-                    i = 60;
-                }
+        if (exitFlag())
+            break;
+
+        /* If reporting is disabled or the reporter was never constructed,
+           drain the queue (under the lock) so it cannot grow unbounded, but
+           do not touch the NULL reporter. */
+        if (rx_options.noreport || reporter == NULL) {
+            struct decoder_results dr;
+            while (tsq_pop(dec_results_queue, &lock, &dr)) {
+                /* discard */
             }
-            pthread_mutex_lock(&lock);
+            continue;
+        }
 
-            while (dec_results_queue.size() > MAX_REPORTS_PER_PACKET) {
-                for (int i = 0; i < MAX_REPORTS_PER_PACKET; i++) {
-                    struct decoder_results dr = dec_results_queue.front();
-                    reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
-                    dec_results_queue.erase(dec_results_queue.begin());
-                }
+        /* Drain the queue in packets of up to MAX_REPORTS_PER_PACKET.
+           Each pop is done atomically under the lock via tsq_pop(). */
+        struct decoder_results dr;
+        int inPacket = 0;
+        bool anyInPacket = false;
+
+        while (tsq_pop(dec_results_queue, &lock, &dr)) {
+            reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
+            anyInPacket = true;
+            if (++inPacket >= MAX_REPORTS_PER_PACKET) {
                 reporter->send();
-            }
-
-            while (dec_results_queue.size()) {
-                struct decoder_results dr = dec_results_queue.front();
-                reporter->addReceiveRecord(dr.call, dr.freq, dr.snr);
-                dec_results_queue.erase(dec_results_queue.begin());
-            }
-            reporter->send();
-            pthread_mutex_unlock(&lock);
-
-        } else {
-            int i = 0;
-            while (i < 60) {
-                sleep(1);
-                i++;
-                if (exitFlag()) {
-                    i = 60;
-                }
+                inPacket = 0;
+                anyInPacket = false;
             }
         }
+        if (anyInPacket)
+            reporter->send();
     }
 
     return NULL;
@@ -470,18 +468,14 @@ void postSpots(uint32_t n_results) {
     /* Fixed strings for Mode */
     const char txMode[] = "FT8";
 
-    pthread_mutex_lock(&lock);
-
     for (uint32_t i = 0; i < n_results; i++) {
         struct decoder_results dr;
 
-        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr - 20;
-        dec_results_queue.push_back(dr);
+        tsq_push(dec_results_queue, &lock, dr);
     }
-    pthread_mutex_unlock(&lock);
 }
 
 /* Report on a WebCluster -- Ex. RBN Network */
@@ -547,41 +541,16 @@ void printSpots(uint32_t n_results) {
     */
 
     for (uint32_t i = 0; i < n_results; i++) {
-        pthread_mutex_lock(&msglock);  // Protect decodes structure
-        /* CQlock */
-        pthread_mutex_lock(&CQlock);  // Protect decodes structure
-
-#ifdef TXWINTEST
-
-        wprintw(trafficW, "%02d:%02dz  %2ddB  %8dHz %5s %10s %6s\n",
-                rx_state.gtm->tm_hour,
-                rx_state.gtm->tm_min,
-                dec_results[i].snr,
-                dec_results[i].freq + dec_options.freq,
-                dec_results[i].cmd,
-                dec_results[i].call,
-                dec_results[i].loc);
-
-#endif
-
         /* Rather than printing the results, we exploit a queue */
         struct decoder_results dr;
 
-        // strncpy(dr.call, dec_results[i].call, strlen(dec_results[i].call));
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         snprintf(dr.cmd, sizeof(dr.cmd), "%s", dec_results[i].cmd);
         dr.freq = dec_results[i].freq + dec_options.freq;
         dr.snr = dec_results[i].snr;
         dr.tempus = dec_results[i].tempus;
-        cq_queue.push_back(dr);
-
-        pthread_mutex_unlock(&CQlock);   // Protect decodes structure
-        pthread_mutex_unlock(&msglock);  // Protect decodes structure
+        tsq_push(cq_queue, &CQlock, dr);
     }
-
-#ifdef TXWINTEST
-    wrefresh(trafficW);
-#endif
 }
 
 void saveSample(float *iSamples, float *qSamples) {
@@ -590,7 +559,8 @@ void saveSample(float *iSamples, float *qSamples) {
 
         time_t rawtime;
         time(&rawtime);
-        struct tm *gtm = gmtime(&rawtime);
+        struct tm gtmv;
+        struct tm *gtm = gmtime_r(&rawtime, &gtmv);
 
         snprintf(filename, sizeof(filename) - 1, "%.8s_%04d-%02d-%02d_%02d-%02d-%02d.iq",
                  rx_options.filename,
@@ -611,6 +581,8 @@ double atofs(char *s) {
     uint32_t len;
     double suff = 1.0;
     len = strlen(s);
+    if (len == 0)  /* Guard against s[-1] OOB access on empty argument */
+        return 0.0;
     last = s[len - 1];
     s[len - 1] = '\0';
 
@@ -777,6 +749,11 @@ void decodeRecordedFile(char *filename) {
     static uint32_t samples_len;
     int32_t n_results = 0;
 
+    if (strlen(filename) < 3) {
+        fprintf(stderr, "Not a valid filename!! (need .iq or .c2 extension)\n");
+        return;
+    }
+
     if (strcmp(&filename[strlen(filename) - 3], ".iq") == 0) {
         samples_len = readRawIQfile(iSamples, qSamples, filename);
     } else if (strcmp(&filename[strlen(filename) - 3], ".c2") == 0) {
@@ -795,7 +772,7 @@ void decodeRecordedFile(char *filename) {
         time_t unixtime;
         time(&unixtime);
         unixtime = unixtime - 120 + 1;
-        rx_state.gtm = gmtime(&unixtime);
+        gmtime_r(&unixtime, &rx_state.gtm);
 
         printSpots(n_results);
     }
@@ -886,12 +863,13 @@ int32_t decoderSelfTest() {
 
     printSpots(n_results);
 
-    /* Simple consistency check */
-    if (strcmp(dec_results[0].call, "K1JT") &&
-        strcmp(dec_results[0].loc, "FN20")) {
-        return 0;
-    } else {
+    /* Simple consistency check: success only when BOTH callsign and locator
+       match the reference decode. strcmp() returns 0 on match, so use !strcmp. */
+    if (!strcmp(dec_results[0].call, "K1JT") &&
+        !strcmp(dec_results[0].loc, "FN20")) {
         return 1;
+    } else {
+        return 0;
     }
 }
 
@@ -1072,6 +1050,12 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                 strPtr = strtok(NULL, " ");  // Move on the XY or Callsign part
 
+                /* Guard against a malformed "CQ" with no following token */
+                if (strPtr == NULL) {
+                    LOG(LOG_DEBUG, "Decoded : bare CQ with no callsign, skipping\n");
+                    continue;
+                }
+
                 pthread_mutex_lock(&msglock);  // Protect decodes structure
 
                 sprintf(decodes[num_decoded].cmd, "CQ   ");
@@ -1087,9 +1071,11 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 }
                 */
 
-                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr);
+                /* strPtr (callsign) may be NULL here if the message was e.g.
+                   "CQ DX" with nothing after; treat as empty rather than deref */
+                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr ? strPtr : "");
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
-                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr);
+                snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr ? strPtr : "");
 
                 decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
                 decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
@@ -1105,9 +1091,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
                 qsoMsg.tempus = current_time;
 
-                pthread_mutex_lock(&QSOHlock);
-                qsoh_queue.push_back(qsoMsg);
-                pthread_mutex_unlock(&QSOHlock);
+                tsq_push(qsoh_queue, &QSOHlock, qsoMsg);
 
                 num_decoded++;
             } else
@@ -1120,9 +1104,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     char *dst = strPtr;
                     char *src = strtok(NULL, " ");
                     char *msg = strtok(NULL, " \n");
-                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src);
-                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst);
-                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg);
+                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src ? src : "");
+                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst ? dst : "");
+                    snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg ? msg : "");
 
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
                     qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
@@ -1131,9 +1115,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     qsoMsg.tempus = current_time;
 
                     /* Feed the QSO Handler machine */
-                    pthread_mutex_lock(&QSOHlock);
-                    qsoh_queue.push_back(qsoMsg);
-                    pthread_mutex_unlock(&QSOHlock);
+                    tsq_push(qsoh_queue, &QSOHlock, qsoMsg);
                 }
             }
             // In any case we will log the message
@@ -1143,18 +1125,16 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             char *dst = strPtr;
             char *src = strtok(NULL, " ");
-            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src);
-            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst);
-            snprintf(logMsg.message, sizeof(logMsg.message), "%s", strtok(NULL, " \n"));
+            char *logtxt = strtok(NULL, " \n");
+            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src ? src : "");
+            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst ? dst : "");
+            snprintf(logMsg.message, sizeof(logMsg.message), "%s", logtxt ? logtxt : "");
 
             logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
             logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
             logMsg.tempus = current_time;
 
-            pthread_mutex_lock(&LOGlock);  // Protect decodes structure
-            log_queue.push_back(logMsg);
-
-            pthread_mutex_unlock(&LOGlock);  // Protect decodes structure
+            tsq_push(log_queue, &LOGlock, logMsg);
 
             // wprintw(trafficW, "%dHz - %02d - %s\n", (int32_t)freq_hz + dec_options.freq + 1500, (int32_t)cand->score, msgToPrint);
 
@@ -1168,9 +1148,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     struct tick_message tickMsg;
     tickMsg.currentSlot = thisSlot;
 
-    pthread_mutex_lock(&Ticklock);
-    tick_queue.push_back(tickMsg);
-    pthread_mutex_unlock(&Ticklock);
+    tsq_push(tick_queue, &Ticklock, tickMsg);
 }
 
 void closeRtlDevice(void) {
@@ -1246,7 +1224,7 @@ bool startRtlDevice(char *resultText) {
 void usage(FILE *stream, int32_t status) {
     fprintf(stream,
             "rtlsdr_ft8d, a simple FT8 daemon for RTL receivers\n\n"
-            "Use:\rtlsdr_ft8d -f frequency -c callsign -l locator [options]\n"
+            "Use:\n\trtlsdr_ft8d -f frequency -c callsign -l locator [options]\n"
             "\t-f dial frequency [(,k,M) Hz] or band string\n"
             "\t   If band string is used, the default dial frequency will used.\n"
             "\t   Bands: 160m 80m 60m 40m 30m 20m 17m 15m 12m 10m 6m 4m 2m 1m25 70cm 23cm\n"
@@ -1289,9 +1267,6 @@ int main(int argc, char **argv) {
     int32_t rtl_count;
     char rtl_vendor[256], rtl_product[256], rtl_serial[256];
 
-    FILE *stream;
-    stream = fopen("/tmp/ft8.log", "w+");
-
     initrx_options();
 
     /* FFTW init & allocation */
@@ -1316,6 +1291,7 @@ int main(int argc, char **argv) {
                         exit(EXIT_FAILURE);
                         break;
                 }
+                break;  /* Prevent fall-through into 'f' with a NULL optarg */
             case 'f':  // Frequency
                 if (!strcasecmp(optarg, "160m")) {
                     rx_options.dialfreq = 1840000;
@@ -1412,11 +1388,11 @@ int main(int argc, char **argv) {
             case 't':  // Seft test (used in unit-test CI pipeline)
                 rx_options.selftest = true;
                 break;
-            case 'w':  // Read a signal and decode
+            case 'w':  // Write received signal to a file and exit
                 rx_options.writefile = true;
                 rx_options.filename = optarg;
                 break;
-            case 'r':  // Write a signal and exit
+            case 'r':  // Read a signal from a file and decode
                 rx_options.readfile = true;
                 rx_options.filename = optarg;
                 break;
@@ -1454,14 +1430,23 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Always construct the reporter so that reporting can be toggled ON at
+       runtime (via the "PSK ON" command) without dereferencing a NULL pointer.
+       Whether spots are actually sent is gated by rx_options.noreport in the
+       pskUploader thread. */
     if (!rx_options.noreport) {
         wprintw(trafficW, "PSK Reporter Initialized!\n");
         wrefresh(trafficW);
-        reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
+    reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
 
-    /* Now we can mute stderr */
-    stderr = stream;
+    /* Now we can mute stderr by redirecting it to a log file.
+       Use freopen() rather than assigning the stderr macro (which is UB). */
+    if (freopen("/tmp/ft8.log", "w+", stderr) == NULL) {
+        /* Non-fatal: keep the original stderr if redirection fails */
+        wprintw(trafficW, "Warning: cannot redirect stderr to /tmp/ft8.log\n");
+        wrefresh(trafficW);
+    }
 
     /* Calcule shift offset */
     rx_options.realfreq = rx_options.dialfreq + rx_options.shift + rx_options.upconverter;
@@ -1514,7 +1499,8 @@ int main(int argc, char **argv) {
     struct timeval lTime;
     time_t rawtime;
     time(&rawtime);
-    struct tm *gtm = gmtime(&rawtime);
+    struct tm gtmv;
+    struct tm *gtm = gmtime_r(&rawtime, &gtmv);
 
     /* Print used parameter */
     wprintw(trafficW, "\nStarting rtlsdr-ft8d (%04d-%02d-%02d, %02d:%02dz) -- Version %s\n",

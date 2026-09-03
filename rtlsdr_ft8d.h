@@ -109,8 +109,10 @@ struct receiver_state {
     /* Buffer selected (0 or 1) */
     uint32_t bufferIndex;
 
-    /* Time at the beginning of the frame to decode */
-    struct tm *gtm;
+    /* Time at the beginning of the frame to decode.
+       Stored by value (filled via gmtime_r) rather than as a pointer into
+       gmtime()'s shared static buffer, which was a cross-thread hazard. */
+    struct tm gtm;
 };
 
 struct receiver_options {

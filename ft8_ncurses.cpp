@@ -17,6 +17,7 @@
 #include <rtlsdr_ft8d.h>
 #include <ft8tx/FT8Types.h>
 #include <qsoHandler.h>
+#include <tsqueue.h>
 
 extern const char *rtlsdr_ft8d_version;
 extern char pskreporter_app_version[];
@@ -128,7 +129,8 @@ int init_ncurses(uint32_t initialFreq) {
 
     /* We need the time of the day */
     time_t currentTime = time(NULL);
-    struct tm tm = *localtime(&currentTime);
+    struct tm tmv;
+    struct tm tm = *localtime_r(&currentTime, &tmv);
 
     /* create subwindow on stdscr */
 
@@ -304,12 +306,7 @@ void *TXHandler(void *vargp) {
     txStatusFlag = TX_IDLE;
 
     while (exitTxThread == false) {
-        if (tx_queue.size()) {
-            // Receive the message from the queue
-            pthread_mutex_lock(&TXlock);
-            Txletter = tx_queue.front();
-            tx_queue.erase(tx_queue.begin());
-            pthread_mutex_unlock(&TXlock);
+        if (tsq_pop(tx_queue, &TXlock, &Txletter)) {
 
             // sprintf(Txletter.ft8Message, "FT8Tx 20m SA0PRF SA0PRF JO99");
             Txletter.type = SEND_F8_REQ;
@@ -329,9 +326,7 @@ void *TXHandler(void *vargp) {
                 perror("Error, nothing read");
             }
             txStatusFlag = TX_WAITING;
-            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-            kbd_queue.push_back(key);
-            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+            tsq_push(kbd_queue, &KBDlock, key);
 
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
@@ -340,9 +335,7 @@ void *TXHandler(void *vargp) {
             txStatusFlag = TX_ONGOING;
             setTransmitting();
 
-            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-            kbd_queue.push_back(key);
-            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+            tsq_push(kbd_queue, &KBDlock, key);
 
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
@@ -351,15 +344,11 @@ void *TXHandler(void *vargp) {
             txStatusFlag = TX_END;
             resetTransmitting();
 
-            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-            kbd_queue.push_back(key);
-            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+            tsq_push(kbd_queue, &KBDlock, key);
             sleep(1);
 
             txStatusFlag = TX_IDLE;
-            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-            kbd_queue.push_back(key);
-            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+            tsq_push(kbd_queue, &KBDlock, key);
 
             // closing the connected socket
             close(client_fd);
@@ -492,8 +481,10 @@ void *KBDHandler(void *vargp) {
                         break;
 
                     default:
-                        editString[ix] = key;
-                        editString[ix + 1] = 0;
+                        if (ix < MAXTXSTRING - 1) {  /* Guard against buffer overflow */
+                            editString[ix] = key;
+                            editString[ix + 1] = 0;
+                        }
                 }
                 // wprintw(qso, "Key Pressed %d, editString %s\n", key, editString);
                 // wrefresh(qso);
@@ -531,9 +522,7 @@ void *KBDHandler(void *vargp) {
         // wprintw(qso, "Active Win %d\n", activeWin);
         // wrefresh(qso);
 
-        pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-        kbd_queue.push_back(key);
-        pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
+        tsq_push(kbd_queue, &KBDlock, (char)key);
         usleep(10000);                   // Wait 10msec
     }
 
@@ -551,7 +540,8 @@ void printCQ(struct decoder_results *cqReq) {
         wattrset(cqW, A_NORMAL);
 
     /* convert to localtime */
-    struct tm *local = localtime(&cqReq->tempus);
+    struct tm localv;
+    struct tm *local = localtime_r(&cqReq->tempus, &localv);
     ft8slot_t thisSlot = ((cqReq->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
     /* and set the string */
@@ -578,7 +568,8 @@ void printQSORemote(plain_message *logMsg) {
         wattrset(qso, COLOR_PAIR(2) | A_BOLD);  // Print in RED
         /* convert to localtime */
         time_t t = time(NULL);
-        struct tm *local = localtime(&t);
+        struct tm localv;
+        struct tm *local = localtime_r(&t, &localv);
         sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
         wprintw(qso, "%s %dHz %s %s %s %s\n",
                 timeString,
@@ -592,7 +583,8 @@ void printQSORemote(plain_message *logMsg) {
         wattrset(qso, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
         /* convert to localtime */
-        struct tm *local = localtime(&logMsg->tempus);
+        struct tm localv;
+        struct tm *local = localtime_r(&logMsg->tempus, &localv);
 
         /* and set the string */
         sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
@@ -615,7 +607,8 @@ void displayTxString(char *txMessage) {
 
     time_t rawtime;
     time(&rawtime);
-    struct tm *local = gmtime(&rawtime);
+    struct tm localv;
+    struct tm *local = gmtime_r(&rawtime, &localv);
 
     /* and set the string */
     sprintf(timeString, "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
@@ -638,7 +631,8 @@ void printClock(void) {
 
     // time_t current_time = time(NULL);
     time_t current_time = lTime.tv_sec;
-    struct tm tm = *localtime(&current_time);
+    struct tm tmv;
+    struct tm tm = *localtime_r(&current_time, &tmv);
 
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
 
@@ -659,7 +653,8 @@ void printLog(plain_message *logMsg) {
         wattrset(trafficW, COLOR_PAIR(3) | A_BOLD);  // QSO are GREEN
 
     /* convert to localtime */
-    struct tm *local = localtime(&logMsg->tempus);
+    struct tm localv;
+    struct tm *local = localtime_r(&logMsg->tempus, &localv);
     ft8slot_t thisSlot = ((logMsg->tempus / FT8_PERIOD) & 0x01) ? odd : even;
 
     /* and set the string */
@@ -705,43 +700,22 @@ void *CQHandler(void *vargp) {
         struct plain_message qsoMsg;
         struct plain_message logMsg;
 
-        if (log_queue.size()) {
-            pthread_mutex_lock(&LOGlock);
-            logMsg = log_queue.front();
-            log_queue.erase(log_queue.begin());
-            pthread_mutex_unlock(&LOGlock);
-
+        if (tsq_pop(log_queue, &LOGlock, &logMsg)) {
             printLog(&logMsg);
             termRefresh = true;
         }
-        if (cq_queue.size()) {
-            pthread_mutex_lock(&CQlock);
-            dr = cq_queue.front();
-            cq_queue.erase(cq_queue.begin());
-            pthread_mutex_unlock(&CQlock);
-
+        if (tsq_pop(cq_queue, &CQlock, &dr)) {
             printCQ(&dr);
             termRefresh = true;
         }
-        if (kbd_queue.size()) {
-            pthread_mutex_lock(&KBDlock);  // Protect key queue structure
-            key = kbd_queue.front();
-            kbd_queue.erase(kbd_queue.begin());
-            pthread_mutex_unlock(&KBDlock);  // Protect key queue structure
-
+        if (tsq_pop(kbd_queue, &KBDlock, &key)) {
             /*
                         if (key == TAB)
                             focusOnWin(activeWin);
             */
             termRefresh = true;
         }
-        if (qso_queue.size()) {
-            pthread_mutex_lock(&QSOlock);
-
-            qsoMsg = qso_queue.front();
-            qso_queue.erase(qso_queue.begin());
-            pthread_mutex_unlock(&QSOlock);
-
+        if (tsq_pop(qso_queue, &QSOlock, &qsoMsg)) {
             printQSORemote(&qsoMsg);
             termRefresh = true;
         }
