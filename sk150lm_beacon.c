@@ -77,8 +77,8 @@ int main(int argc, char const* argv[])
     serv_addr.sun_family = AF_UNIX;
     strncpy(serv_addr.sun_path, SOCKNAME, sizeof(serv_addr.sun_path) - 1);
 
-    sprintf(Txletter.ft8Message,"FT8Tx 20m CQ SA0PRF JO99");
-    Txletter.type = SEND_F8_REQ;
+    sprintf(Txletter.ft8Message,"FT8Tx SA0PRF JO99 23 20m -o");
+    Txletter.type = SEND_WSPR;
 
     if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");

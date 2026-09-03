@@ -73,7 +73,7 @@ extern "C" {
 }
 #endif /* __cplusplus */
 
-#define PROGRAM "FT8/Wspr Transmitter Service v 0.3 2023-11-17"
+#define PROGRAM "FT8/Wspr Transmitter Service v 0.4 2026-03-26"
 
 // Note on accessing memory in RPi:
 //
@@ -151,7 +151,7 @@ extern "C" {
 // 0.16s long. For some reason, despite the use of DMA, the load on the PI
 // affects the TX length of the symbols. However, the varying symbol length is
 // compensated for in the main loop.
-#define F_PWM_CLK_INIT (31156186.6125761 / 0.682 * 0.16)  // TODO?
+#define F_PWM_CLK_INIT (31156186.6125761 / 0.682 * 0.16)
 
 // FT8 nominal symbol time
 #define FT8_SYMTIME (1920.0 / 12000.0)
@@ -404,7 +404,7 @@ void cleanupAndExit(int sig) {
 
 int main(const int argc, char *const argv[]) {
     int server_fd, valread;
-    struct sockaddr address = {AF_UNIX, SOCKNAME};
+    struct sockaddr_un address;
     char mode[] = "0777";
 
     struct sigaction act;
@@ -415,6 +415,10 @@ int main(const int argc, char *const argv[]) {
     char **argvalue;
 
     fd_set readfds; /* Flag for select()     */
+
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    strncpy(address.sun_path, SOCKNAME, sizeof(address.sun_path) - 1);
 
     printf("%s\n\n", PROGRAM);
 
@@ -515,12 +519,13 @@ int main(const int argc, char *const argv[]) {
 
         switch (Rxletter.type) {
             case SEND_F8_REQ:
-                wordexp(Rxletter.ft8Message, &params, WRDE_DOOFFS);
+                wordexp(Rxletter.ft8Message, &params, 0);
                 Txletter.type = SEND_ACK;
                 sprintf(Txletter.ft8Message, "SEND_F8_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
-                // mainFT8(argnumber, argvalue);
+                optind = 1;
                 mainFT8(params.we_wordc, params.we_wordv);
+                wordfree(&params);
                 cleanup();
                 break;
             case TEST_SEND:
@@ -530,12 +535,13 @@ int main(const int argc, char *const argv[]) {
                 handleSendTx(new_socket);
                 break;
             case SEND_WSPR:
-                wordexp(Rxletter.ft8Message, &params, WRDE_DOOFFS);
+                wordexp(Rxletter.ft8Message, &params, 0);
                 Txletter.type = SEND_ACK;
-                sprintf(Txletter.ft8Message, "SEND_F8_REQ");
+                sprintf(Txletter.ft8Message, "SEND_WSPR_REQ");
                 send(new_socket, &Txletter, sizeof(Txletter), 0);
-                // mainFT8(argnumber, argvalue);
+                optind = 1;
                 mainWSPR(params.we_wordc, params.we_wordv);
+                wordfree(&params);
                 cleanup();
                 break;
             default:
@@ -613,12 +619,12 @@ void txon(bool LedON) {
     // Set GPIO drive strength, more info: http://www.scribd.com/doc/101830961/GPIO-Pads-Control2
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 0;  //2mA -3.4dBm
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 1;  //4mA +2.1dBm
-    // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 2;  //6mA +4.9dBm
+    ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 2;  //6mA +4.9dBm
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 3;  //8mA +6.6dBm(default)
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 4;  //10mA +8.2dBm
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 5;  //12mA +9.2dBm
     // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 6;  //14mA +10.0dBm
-    ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 7;  // 16mA +10.6dBm
+    // ACCESS_BUS_ADDR(PADS_GPIO_0_27_BUS) = 0x5a000018 + 7;  // 16mA +10.6dBm
 
     disable_clock();
 
@@ -692,25 +698,25 @@ void txSym(
         // Configure the transmission for this iteration
         // Set GPIO pin to transmit f0
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->SOURCE_AD = (long int)constPage.b + f0_idx * 4;
 
         // Wait for n_f0 PWM clocks
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->TXFR_LEN = n_f0;
 
         // Set GPIO pin to transmit f1
         bufPtr++;
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->SOURCE_AD = (long int)constPage.b + f1_idx * 4;
 
         // Wait for n_f1 PWM clocks
         bufPtr = (bufPtr + 1) % (1024);
-        while (ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (long int)(instrs[bufPtr].b))
+        while ((unsigned int)ACCESS_BUS_ADDR(DMA_BUS_BASE + 0x04 /* CurBlock*/) == (unsigned int)(uintptr_t)(instrs[bufPtr].b))
             usleep(100);
         ((struct CB *)(instrs[bufPtr].v))->TXFR_LEN = n_f1;
 
@@ -834,8 +840,11 @@ void setupDMA(
     // set up a clock for the PWM
     ACCESS_BUS_ADDR(CLK_BUS_BASE + 40 * 4 /*PWMCLK_CNTL*/) = 0x5A000026;  // Source=PLLD and disable
     usleep(1000);
-    // ACCESS_BUS_ADDR(CLK_BUS_BASE + 41*4 /*PWMCLK_DIV*/)  = 0x5A002800;
-    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A002000;   // set PWM div to 2, for 250MHz
+#ifdef RPI4
+    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A003000;   // set PWM div to 3, for 250MHz (750/3)
+#else
+    ACCESS_BUS_ADDR(CLK_BUS_BASE + 41 * 4 /*PWMCLK_DIV*/) = 0x5A002000;   // set PWM div to 2, for 250MHz (500/2)
+#endif
     ACCESS_BUS_ADDR(CLK_BUS_BASE + 40 * 4 /*PWMCLK_CNTL*/) = 0x5A000016;  // Source=PLLD and enable
     usleep(1000);
 
@@ -1374,12 +1383,12 @@ void setup_peri_base_virt(
 int mainFT8(const int argc, char *const argv[]) {
 #ifdef RPI1
     std::cout << "Detected Raspberry Pi version 1" << std::endl;
-#else
-#ifdef RPI23
+#elif defined(RPI23)
     std::cout << "Detected Raspberry Pi version 2/3" << std::endl;
+#elif defined(RPI4)
+    std::cout << "Detected Raspberry Pi version 4" << std::endl;
 #else
 #error "RPI version macro is not defined"
-#endif
 #endif
 
     // Initialize the RNG
@@ -2016,6 +2025,7 @@ int mainWSPR(const int argc, char *const argv[]) {
     double test_tone;
     bool no_delay;
     mode_type mode;
+    bool txbegin = true;
     int terminate;
     parse_commandline_wspr(
         argc,
@@ -2158,6 +2168,16 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvBegin);
                 std::cout << std::endl;
 
+                if (txbegin == true) {
+                    FT8Msg Txletter;
+
+                    Txletter.type = CHANGE_RTX_STATE;
+                    Txletter.RTXstate = true;
+                    sprintf(Txletter.ft8Message, "Transmitting...\n");
+                    send(new_socket, &Txletter, sizeof(Txletter), 0);
+                    txbegin = false;
+                }
+                
                 struct timeval sym_start;
                 struct timeval diff;
                 int bufPtr = 0;
@@ -2186,7 +2206,7 @@ int mainWSPR(const int argc, char *const argv[]) {
                 timeval_print(&tvEnd);
                 timeval_subtract(&tvDiff, &tvEnd, &tvBegin);
                 printf(" (%ld.%03ld s)\n", tvDiff.tv_sec, (tvDiff.tv_usec + 500) / 1000);
-
+              
             } else {
                 std::cout << "  Skipping transmission" << std::endl;
                 usleep(1000000);
@@ -2201,6 +2221,13 @@ int mainWSPR(const int argc, char *const argv[]) {
                 break;
             }
         }
+        FT8Msg Txletter;
+        
+        Txletter.type = CHANGE_RTX_STATE;
+        Txletter.RTXstate = false;
+        sprintf(Txletter.ft8Message, "End of transmission...\n");
+        send(new_socket, &Txletter, sizeof(Txletter), 0);
+        
     }
 
     return 0;
