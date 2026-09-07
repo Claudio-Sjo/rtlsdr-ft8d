@@ -141,6 +141,7 @@ struct receiver_options {
     bool qso;
     bool isHF;         /* True when an HF band was selected (needs v3/v4 handling) */
     bool directset;    /* True when the user explicitly set -d (do not auto-override) */
+    bool rxtest;       /* True: synthetic RX source, no real RTL device */
     rtl_gen_t rtlgen;  /* Forced RTL generation, or rtlAuto to detect */
     char *filename;
 };
@@ -195,6 +196,7 @@ int32_t writeRawIQfile(float *iSamples, float *qSamples, char *filename);
 int32_t readC2file(float *iSamples, float *qSamples, char *filename);
 void decodeRecordedFile(char *filename);
 float whiteGaussianNoise(float factor);
+bool genFT8Signal(float *iSamples, float *qSamples, const char *message, float audioFreq, float amp, float wgn);
 int32_t decoderSelfTest();
 void usage(FILE *stream, int32_t status);
 void ft8_subsystem(float *iSamples, float *qSamples, uint32_t samples_len, struct decoder_results *decodes, int32_t *n_results);

@@ -254,7 +254,8 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
 static void sigint_callback_handler(int signum) {
     fprintf(stderr, "Signal caught %d, exiting!\n", signum);
     rx_state.exit_flag = true;
-    rtlsdr_cancel_async(rtl_device);
+    if (rtl_device)
+        rtlsdr_cancel_async(rtl_device);
 }
 
 /* Thread used for this RX blocking function */
@@ -262,6 +263,78 @@ static void *rtlsdr_rx(void *arg) {
     rtlsdr_read_async(rtl_device, rtlsdr_callback, NULL, 0, DEFAULT_BUF_LENGTH);
     rtlsdr_cancel_async(rtl_device);
     return NULL;
+}
+
+/*
+ * Synthetic RX source used by -rx-test (no real RTL-SDR needed).
+ *
+ * FT8 is slot-based: each 15-second window carries one ~12.6 s transmission,
+ * and the decoder processes one window at a time. This helper fills one buffer
+ * with a whole window worth of traffic -- a varying 4 to 5 FT8 signals summed
+ * together at distinct audio frequencies (as a real band would present them),
+ * mixing plain CQ calls and messages directed at our own callsign so the QSO
+ * state machine can be exercised too. Callsigns are of the A1TEST family.
+ *
+ * It is invoked once per slot by the (unchanged) 15 s main loop, in place of
+ * the RTL sampler, so the real slot timing and the rest of the decode -> UI
+ * -> QSO -> reporting pipeline are exercised exactly as with a real device.
+ */
+static void fillRxTestBuffer(uint32_t idx) {
+    static const char *calls[] = {"A1TEST", "A2TEST", "A3TEST", "A4TEST",
+                                  "A5TEST", "A6TEST", "A7TEST", "A8TEST"};
+    static const char *grids[] = {"JO65", "IO91", "FN20", "JN58",
+                                  "EM12", "JO99", "IO83", "KP20"};
+    const int nCalls = (int)(sizeof(calls) / sizeof(calls[0]));
+
+    /* Audio frequencies spread across the passband, one slot per signal */
+    const float audioFreqs[] = {500.0f, 900.0f, 1300.0f, 1700.0f, 2100.0f};
+    const int nFreqs = (int)(sizeof(audioFreqs) / sizeof(audioFreqs[0]));
+
+    static uint32_t rot = 0; /* rotates the station set between slots */
+
+    float *iS = rx_state.iSamples[idx];
+    float *qS = rx_state.qSamples[idx];
+
+    /* Clear the whole window buffer first */
+    for (int i = 0; i < SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE; i++) {
+        iS[i] = 0.0f;
+        qS[i] = 0.0f;
+    }
+
+    /* 4 or 5 signals this slot, varying per slot */
+    int nSignals = 4 + (rot % 2);  // 4 or 5
+
+    const char *myCall = dec_options.rcall[0] ? dec_options.rcall : "A0TEST";
+
+    for (int s = 0; s < nSignals; s++) {
+        const char *call = calls[(rot + s) % nCalls];
+        const char *grid = grids[(rot + s) % nCalls];
+        float audio = audioFreqs[s % nFreqs];
+
+        char message[32];
+        /* Mix CQ calls with messages directed at us (for the QSO machine) */
+        switch ((rot + s) % 4) {
+            case 0:
+                snprintf(message, sizeof(message), "CQ %s %s", call, grid);
+                break;
+            case 1:
+                snprintf(message, sizeof(message), "%s %s %s", myCall, call, grid);
+                break;
+            case 2:
+                snprintf(message, sizeof(message), "%s %s -12", myCall, call);
+                break;
+            default:
+                snprintf(message, sizeof(message), "%s %s RR73", myCall, call);
+                break;
+        }
+
+        /* Sum this signal into the window (amp lowered a bit since several
+           signals share the buffer; still well above the 0.02 noise floor) */
+        genFT8Signal(iS, qS, message, audio, 0.4f, 0.02f);
+    }
+
+    rx_state.iqIndex[idx] = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
+    rot++;
 }
 
 /* Thread used for the decoder */
@@ -356,6 +429,7 @@ void initrx_options() {
     rx_options.qso = true;
     rx_options.isHF = false;
     rx_options.directset = false;
+    rx_options.rxtest = false;
     rx_options.rtlgen = rtlAuto;
 }
 
@@ -815,6 +889,51 @@ float whiteGaussianNoise(float factor) {
     return (float)X * factor;
 }
 
+/*
+ * Generate an FT8 signal for the text `message` and ADD it into the I/Q
+ * buffers at the given audio frequency (Hz). Used by the self-test and the
+ * synthetic -rx-test source. Because it adds (does not overwrite), several
+ * signals can be summed into the same buffer.
+ *
+ * Returns true on success, false if the message could not be encoded.
+ */
+/* Callsign hash interface (defined below), used by genFT8Signal to register
+   nonstandard callsigns at encode time */
+extern ftx_callsign_hash_interface_t hash_if;
+
+bool genFT8Signal(float *iSamples, float *qSamples, const char *message,
+                  float audioFreq, float amp, float wgn) {
+    /* Pack the text into a binary message. Passing the callsign hash interface
+       lets nonstandard/compound calls (e.g. A1TEST) be registered in the hash
+       table at encode time, so the decoder can later resolve their hashes to
+       text instead of printing "<...>". */
+    ftx_message_t msg;
+    ftx_message_rc_t rc = ftx_message_encode(&msg, &hash_if, message);
+    if (rc != FTX_MESSAGE_RC_OK)
+        return false;
+
+    /* Encode the binary message as a sequence of FSK tones */
+    uint8_t tones[FT8_NN];
+    ft8_encode(msg.payload, tones);
+
+    const double df = 3200.0 / 512.0;  // tone spacing (6.25 Hz)
+    const double dt = 1.0 / 3200.0;    // sample period
+    double phi = 0.0;
+
+    for (int i = 0; i < FT8_NN; i++) {
+        double dphi = 2.0 * M_PI * dt * (audioFreq + ((double)tones[i] - 3.5) * df);
+        for (int j = 0; j < 512; j++) {
+            int index = 512 * i + j;
+            if (index >= SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE)
+                break;  // Never overflow the buffer
+            iSamples[index] += amp * cos(phi) + whiteGaussianNoise(wgn);
+            qSamples[index] += amp * sin(phi) + whiteGaussianNoise(wgn);
+            phi += dphi;
+        }
+    }
+    return true;
+}
+
 int32_t decoderSelfTest() {
     static float iSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
     static float qSamples[SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE] = {0};
@@ -828,46 +947,10 @@ int32_t decoderSelfTest() {
      */
     const char message[] = "CQ K1JT FN20QI";
 
-    /*
-    uint8_t packed[FTX_LDPC_K_BYTES];
-
-    if (pack77(message, packed) < 0) {
-        wprintw(trafficW, "Cannot parse message!\n");
-        return 0;
-    }
-    */
-
-    // First, pack the text data into binary message
-    ftx_message_t msg;
-    ftx_message_rc_t rc = ftx_message_encode(&msg, NULL, message);
-    if (rc != FTX_MESSAGE_RC_OK) {
+    /* Build one FT8 signal at 50 Hz audio into the (zeroed) buffers */
+    if (!genFT8Signal(iSamples, qSamples, message, 50.0f, 0.5f, 0.02f)) {
         printf("Cannot parse message!\n");
-        printf("RC = %d\n", (int)rc);
         return -2;
-    }
-
-    // Second, encode the binary message as a sequence of FSK tones
-    uint8_t tones[FT8_NN];
-    ft8_encode(msg.payload, tones);
-
-    // Encoding, simple FSK modulation
-    float f0 = 50.0;
-    float t0 = 0.0;  // Caution!! Possible buffer overflow with the index calculation (no user input here!)
-    float amp = 0.5;
-    float wgn = 0.02;
-    double phi = 0.0;
-    double df = 3200.0 / 512.0;  // EVAL : #define SIGNAL_SAMPLE_RATE as int or float ??
-    double dt = 1 / 3200.0;
-
-    // Add signal
-    for (int i = 0; i < FT8_NN; i++) {
-        double dphi = 2.0 * M_PI * dt * (f0 + ((double)tones[i] - 3.5) * df);
-        for (int j = 0; j < 512; j++) {
-            int index = t0 / dt + 512 * i + j;
-            iSamples[index] = amp * cos(phi) + whiteGaussianNoise(wgn);
-            qSamples[index] = amp * sin(phi) + whiteGaussianNoise(wgn);
-            phi += dphi;
-        }
     }
 
     /* Save the test sample */
@@ -888,24 +971,135 @@ int32_t decoderSelfTest() {
     }
 }
 
+/*
+ * Callsign hash table.
+ *
+ * FT8 sends nonstandard / compound callsigns (and the "to" call in some
+ * message types) as a 22/12/10-bit hash rather than as text. The full call is
+ * only recoverable if it has been seen before and stored. ft8_lib delegates
+ * this storage to us via the ftx_callsign_hash_interface_t:
+ *   - save_hash(callsign, n22): store the full call under its 22-bit hash.
+ *   - lookup_hash(type, hash, out): given a 22/12/10-bit hash, return the call.
+ *
+ * The 12- and 10-bit hashes are simply n22 >> 10 and n22 >> 12 (see
+ * ft8_lib/ft8/message.c save_callsign()), so storing n22 lets us answer all
+ * three query widths. This was previously stubbed out; implementing it lets
+ * A1TEST-style nonstandard calls resolve instead of printing "<...>".
+ */
+#define CALLSIGN_HASH_TABLE_SIZE 256
+
+struct callsign_hash_entry {
+    bool used;
+    uint32_t n22;
+    char callsign[12];  // up to 11 chars + NUL
+};
+
+static struct callsign_hash_entry callsign_hashtable[CALLSIGN_HASH_TABLE_SIZE];
+static pthread_mutex_t callsign_hash_lock = PTHREAD_MUTEX_INITIALIZER;
+
 void hashtable_init(void) {
+    pthread_mutex_lock(&callsign_hash_lock);
+    for (int i = 0; i < CALLSIGN_HASH_TABLE_SIZE; i++)
+        callsign_hashtable[i].used = false;
+    pthread_mutex_unlock(&callsign_hash_lock);
 }
 
 void hashtable_cleanup(uint8_t max_age) {
+    /* Ageing is not tracked; kept for interface compatibility */
+    (void)max_age;
 }
 
 void hashtable_add(const char *callsign, uint32_t hash) {
-    // This doesn't work, let's move it out for now
-    return;
+    if (callsign == NULL || callsign[0] == '\0')
+        return;
+
+    pthread_mutex_lock(&callsign_hash_lock);
+
+    /* Linear-probe insert keyed on the 22-bit hash; update if already present */
+    uint32_t start = hash % CALLSIGN_HASH_TABLE_SIZE;
+    for (uint32_t i = 0; i < CALLSIGN_HASH_TABLE_SIZE; i++) {
+        uint32_t idx = (start + i) % CALLSIGN_HASH_TABLE_SIZE;
+        if (!callsign_hashtable[idx].used) {
+            callsign_hashtable[idx].used = true;
+            callsign_hashtable[idx].n22 = hash;
+            snprintf(callsign_hashtable[idx].callsign,
+                     sizeof(callsign_hashtable[idx].callsign), "%s", callsign);
+            break;
+        }
+        if (callsign_hashtable[idx].n22 == hash) {
+            /* Refresh the stored text for this hash */
+            snprintf(callsign_hashtable[idx].callsign,
+                     sizeof(callsign_hashtable[idx].callsign), "%s", callsign);
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&callsign_hash_lock);
 }
 
 bool hashtable_lookup(ftx_callsign_hash_type_t hash_type, uint32_t hash, char *callsign) {
-    return false;
+    /* Reduce each stored 22-bit hash to the requested width and compare.
+       n12 = n22 >> 10, n10 = n22 >> 12 (see ft8_lib save_callsign()). */
+    bool found = false;
+
+    pthread_mutex_lock(&callsign_hash_lock);
+    for (int i = 0; i < CALLSIGN_HASH_TABLE_SIZE; i++) {
+        if (!callsign_hashtable[i].used)
+            continue;
+
+        uint32_t stored;
+        switch (hash_type) {
+            case FTX_CALLSIGN_HASH_22_BITS:
+                stored = callsign_hashtable[i].n22 & 0x3FFFFFu;
+                break;
+            case FTX_CALLSIGN_HASH_12_BITS:
+                stored = (callsign_hashtable[i].n22 >> 10) & 0xFFFu;
+                break;
+            case FTX_CALLSIGN_HASH_10_BITS:
+            default:
+                stored = (callsign_hashtable[i].n22 >> 12) & 0x3FFu;
+                break;
+        }
+
+        if (stored == hash) {
+            snprintf(callsign, 12, "%s", callsign_hashtable[i].callsign);
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&callsign_hash_lock);
+
+    return found;
 }
 
 ftx_callsign_hash_interface_t hash_if = {
     .lookup_hash = hashtable_lookup,
     .save_hash = hashtable_add};
+
+/*
+ * Strip the angle brackets that ft8_lib puts around a callsign recovered from
+ * a hash lookup (e.g. "<A6TEST>" -> "A6TEST"). Returns a pointer to a cleaned
+ * copy in the caller-provided buffer, so callsign fields, QSO comparisons and
+ * ADIF logs hold the bare call. Non-bracketed tokens are copied unchanged.
+ */
+static const char *stripBrackets(const char *token, char *out, size_t outsz) {
+    if (token == NULL) {
+        if (outsz)
+            out[0] = '\0';
+        return out;
+    }
+    const char *start = token;
+    size_t len = strlen(token);
+    if (len >= 2 && start[0] == '<' && start[len - 1] == '>') {
+        start++;
+        len -= 2;
+    }
+    if (len >= outsz)
+        len = outsz - 1;
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return out;
+}
 
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
     /* Get the slot type */
@@ -1087,8 +1281,11 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 */
 
                 /* strPtr (callsign) may be NULL here if the message was e.g.
-                   "CQ DX" with nothing after; treat as empty rather than deref */
-                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call), "%.12s", strPtr ? strPtr : "");
+                   "CQ DX" with nothing after; treat as empty rather than deref.
+                   Strip <> from hash-resolved calls (e.g. <A6TEST>). */
+                char callBuf[13];
+                snprintf(decodes[num_decoded].call, sizeof(decodes[num_decoded].call),
+                         "%.12s", stripBrackets(strPtr, callBuf, sizeof(callBuf)));
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr ? strPtr : "");
 
@@ -1119,8 +1316,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     char *dst = strPtr;
                     char *src = strtok(NULL, " ");
                     char *msg = strtok(NULL, " \n");
-                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", src ? src : "");
-                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", dst ? dst : "");
+                    char srcBuf[13], dstBuf[13];
+                    snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", stripBrackets(src, srcBuf, sizeof(srcBuf)));
+                    snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", stripBrackets(dst, dstBuf, sizeof(dstBuf)));
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg ? msg : "");
 
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
@@ -1141,8 +1339,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             char *dst = strPtr;
             char *src = strtok(NULL, " ");
             char *logtxt = strtok(NULL, " \n");
-            snprintf(logMsg.src, sizeof(logMsg.src), "%s", src ? src : "");
-            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", dst ? dst : "");
+            char lsrcBuf[13], ldstBuf[13];
+            snprintf(logMsg.src, sizeof(logMsg.src), "%s", stripBrackets(src, lsrcBuf, sizeof(lsrcBuf)));
+            snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", stripBrackets(dst, ldstBuf, sizeof(ldstBuf)));
             snprintf(logMsg.message, sizeof(logMsg.message), "%s", logtxt ? logtxt : "");
 
             logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
@@ -1295,6 +1494,7 @@ void usage(FILE *stream, int32_t status) {
             "Debugging options:\n"
             "\t-x do not report any spots on web clusters (WSPRnet, PSKreporter...)\n"
             "\t-t decoder self-test (generate a signal & decode), no parameter\n"
+            "\t--rx-test synthetic RX source: generate ~3 FT8 msgs/sec (A1TEST...) with no RTL device\n"
             "\t-w write received signal and exit [filename prefix]\n"
             "\t-r read signal with .iq or .c2 format, decode and exit [filename]\n"
             "\t   (raw format: 375sps, float 32 bits, 2 channels)\n"
@@ -1315,6 +1515,7 @@ int main(int argc, char **argv) {
         {"version", no_argument, 0, 0},
         {"rtl3", no_argument, 0, 0},
         {"rtl4", no_argument, 0, 0},
+        {"rx-test", no_argument, 0, 0},
         {0, 0, 0, 0}};
 
     int32_t rtl_result;
@@ -1349,6 +1550,12 @@ int main(int argc, char **argv) {
                         break;
                     case 3:  // --rtl4 : force RTL-SDR v4 (R828D) behaviour
                         rx_options.rtlgen = rtlV4;
+                        break;
+                    case 4:  // --rx-test : synthetic RX source, no real device
+                        rx_options.rxtest = true;
+                        /* Never report synthetic (fake A1TEST...) traffic to
+                           the live PSKReporter database. Force reporting off. */
+                        rx_options.noreport = true;
                         break;
                 }
                 break;  /* Prevent fall-through into 'f' with a NULL optarg */
@@ -1484,15 +1691,22 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Safety: in synthetic RX-test mode, never report to the live database.
+       Force reporting off and do not even construct the reporter. */
+    if (rx_options.rxtest)
+        rx_options.noreport = true;
+
     /* Always construct the reporter so that reporting can be toggled ON at
        runtime (via the "PSK ON" command) without dereferencing a NULL pointer.
        Whether spots are actually sent is gated by rx_options.noreport in the
-       pskUploader thread. */
-    if (!rx_options.noreport) {
-        wprintw(trafficW, "PSK Reporter Initialized!\n");
-        wrefresh(trafficW);
+       pskUploader thread. (Skipped entirely in rx-test mode.) */
+    if (!rx_options.rxtest) {
+        if (!rx_options.noreport) {
+            wprintw(trafficW, "PSK Reporter Initialized!\n");
+            wrefresh(trafficW);
+        }
+        reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
     }
-    reporter = new PskReporter(dec_options.rcall, dec_options.rloc, pskreporter_app_version);
 
     /* Now we can mute stderr by redirecting it to a log file.
        Use freopen() rather than assigning the stderr macro (which is UB). */
@@ -1540,8 +1754,15 @@ int main(int argc, char **argv) {
 
     /* Init & parameter the device */
     char rtlDevResult[96];
+    bool rtlOk;
 
-    bool rtlOk = startRtlDevice(rtlDevResult);
+    if (rx_options.rxtest) {
+        /* Synthetic RX source: no real device is opened */
+        snprintf(rtlDevResult, sizeof(rtlDevResult), "Synthetic RX-test source (no RTL device)");
+        rtlOk = true;
+    } else {
+        rtlOk = startRtlDevice(rtlDevResult);
+    }
 
     /* Show a centered splash for 5s: device found (or not), arch and version */
     if (rx_options.qso)
@@ -1584,10 +1805,14 @@ int main(int argc, char **argv) {
     uint32_t usec = sec * 1000000 + lTime.tv_usec;
     uint32_t uwait = FT8_BUFRESET - usec;
     uint32_t ft8wait;
-    wprintw(trafficW, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
-    wrefresh(trafficW);
-
-    sleep((uwait / 1000000) > 3 ? (uwait / 1000000) : 3);
+    if (!rx_options.rxtest) {
+        wprintw(trafficW, "Wait for time sync (start in %d sec)\n\n", uwait / 1000000);
+        wrefresh(trafficW);
+        sleep((uwait / 1000000) > 3 ? (uwait / 1000000) : 3);
+    } else {
+        wprintw(trafficW, "RX-test mode: generating ~3 synthetic FT8 msgs/sec\n\n");
+        wrefresh(trafficW);
+    }
 
     wclear(trafficW);
     wrefresh(trafficW);
@@ -1607,7 +1832,8 @@ int main(int argc, char **argv) {
     */
     pthread_cond_init(&decThread.ready_cond, NULL);
     pthread_mutex_init(&decThread.ready_mutex, NULL);
-    pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+    if (!rx_options.rxtest)
+        pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
     pthread_create(&pskThread, NULL, pskUploader, NULL);
     pthread_create(&CQHThread, NULL, CQHandler, NULL);
@@ -1621,6 +1847,38 @@ int main(int argc, char **argv) {
         - Buffer also can be shorter, thus we may reset the bufferIndex twice
     */
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
+        if (rx_options.rxtest) {
+            /* Synthetic slot: honour the real 15 s FT8 timing. Wait until the
+               transmission window would end (FT8_TXTIME), fill the current
+               buffer with a whole window of synthetic traffic, then flip and
+               trigger the decoder exactly like the real path. */
+            gettimeofday(&lTime, NULL);
+            sec = lTime.tv_sec % FT8_PERIOD;
+            usec = sec * 1000000 + lTime.tv_usec;
+            ft8wait = FT8_TXTIME - usec;
+            uwait = FT8_BUFRESET - usec;
+            if (uwait > ft8wait) {
+                usleep(ft8wait);
+                /* Fill the buffer the decoder will read (current bufferIndex),
+                   then flip so prevBuffer points back to it. */
+                fillRxTestBuffer(rx_state.bufferIndex);
+                rx_state.bufferIndex = (rx_state.bufferIndex + 1) % 2;
+                rx_state.iqIndex[rx_state.bufferIndex] = 0;
+                safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
+
+                gettimeofday(&lTime, NULL);
+                sec = lTime.tv_sec % FT8_PERIOD;
+                usec = sec * 1000000 + lTime.tv_usec;
+                uwait = FT8_BUFRESET - usec;
+                usleep(uwait);
+                rx_state.iqIndex[rx_state.bufferIndex] = 0;
+            } else {
+                usleep(uwait);
+                rx_state.iqIndex[rx_state.bufferIndex] = 0;
+            }
+            continue;
+        }
+
         /* Wait for time Sync on 15 secs */
         gettimeofday(&lTime, NULL);
         sec = lTime.tv_sec % FT8_PERIOD;
@@ -1678,16 +1936,21 @@ int main(int argc, char **argv) {
     rx_state.exit_flag = true;
     safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
 
-    /* Stop the RX and free the blocking function */
-    rtlsdr_cancel_async(rtl_device);
-    rtlsdr_close(rtl_device);
+    if (rx_options.rxtest) {
+        /* Synthetic source runs in the main loop; nothing to join */
+    } else {
+        /* Stop the RX and free the blocking function */
+        rtlsdr_cancel_async(rtl_device);
+        rtlsdr_close(rtl_device);
+    }
 
     /* Free FFTW buffers */
     freeFFTW();
 
     /* Wait the thread join (send a signal before to terminate the job) */
     pthread_join(decThread.thread, NULL);
-    pthread_join(rxThread, NULL);
+    if (!rx_options.rxtest)
+        pthread_join(rxThread, NULL);
 
     /* Destroy QSO handler */
     close_qso_handler();

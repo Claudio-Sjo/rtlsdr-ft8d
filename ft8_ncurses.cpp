@@ -74,7 +74,7 @@ uint32_t qsoFreq;
 uint32_t reportedCQ;
 ft8slot_t thisSlot;
 
-bool transmitting = false;
+volatile bool transmitting = false;
 
 void setTransmitting(void) {
     transmitting = true;
@@ -89,25 +89,31 @@ bool getTransmitting(void) {
 }
 
 void refreshBoxes(void) {
-    box(stdscr, 0, 0);
-
+    /* Draw each panel's border and title on its own independent window.
+       These windows do not share cells, so this cannot corrupt other panels. */
+    wattrset(trafficW0, COLOR_PAIR(3) | A_BOLD);
     box(trafficW0, 0, 0);
     mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
     wnoutrefresh(trafficW0);
 
+    wattrset(statusW0, COLOR_PAIR(3) | A_BOLD);
     box(statusW0, 0, 0);
     mvwprintw(statusW0, 0, 10, " Transceiver Status ");
     wnoutrefresh(statusW0);
 
+    wattrset(qso0, COLOR_PAIR(3) | A_BOLD);
     box(qso0, 0, 0);
     mvwprintw(qso0, 0, 10, " Ongoing QSO ");
     wnoutrefresh(qso0);
 
+    wattrset(cqW0, COLOR_PAIR(3) | A_BOLD);
     box(cqW0, 0, 0);
     mvwprintw(cqW0, 0, 10, " Incoming CQ ");
     wnoutrefresh(cqW0);
 
-    wnoutrefresh(stdscr);
+    wattrset(call0, COLOR_PAIR(4) | A_BOLD);
+    box(call0, 0, 0);
+    wnoutrefresh(call0);
 }
 
 int init_ncurses(uint32_t initialFreq) {
@@ -135,31 +141,7 @@ int init_ncurses(uint32_t initialFreq) {
     struct tm tmv;
     struct tm tm = *localtime_r(&currentTime, &tmv);
 
-    /* create subwindow on stdscr */
-
-    header = subwin(stdscr, 1, COLS - 2, 1, 1);
-
-    /* Status Window is in the right, traffic window is at the left */
-
-    // WINDOW *subwin(n_raw, n_col, init_raw, init_col);
-
-    cqW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 3, 4, 3);
-    cqW0 = subwin(stdscr, LINES / 2, COLS / 2, 2, 1);
-
-    statusW = subwin(stdscr, (LINES / 2) - 3, COLS / 2 - 5, 4, (COLS / 2) + 2);
-    statusW0 = subwin(stdscr, LINES / 2, COLS / 2 - 3, 2, (COLS / 2) + 1);
-
-    trafficW0 = subwin(stdscr, (LINES / 2) - 6, (COLS / 2) - 3, LINES / 2 + 2, (COLS / 2) + 1);
-    trafficW = subwin(stdscr, (LINES / 2) - 8, (COLS / 2) - 5, LINES / 2 + 3, (COLS / 2) + 2);
-    trafficWLines = (LINES / 2) - 8;  // Lines for scroll need not to include the Header Line
-
-    qso0 = subwin(stdscr, (LINES / 2) - 6, (COLS / 2), (LINES / 2) + 2, 1);
-    qso = subwin(stdscr, (LINES / 2) - 8, (COLS / 2) - 3, (LINES / 2) + 3, 3);
-    qsoWLines = getmaxy(qso);
-
-    call0 = subwin(stdscr, 3, COLS - 2, LINES - 4, 1);
-    call = subwin(stdscr, 1, COLS - 5, LINES - 3, 3);
-
+    /* Colors first (needed before we style the windows) */
     start_color();
     init_pair(1, COLOR_YELLOW, COLOR_BLACK);
     init_pair(2, COLOR_RED, COLOR_BLACK);
@@ -171,34 +153,66 @@ int init_ncurses(uint32_t initialFreq) {
     init_pair(13, COLOR_BLACK, COLOR_GREEN);
     init_pair(14, COLOR_BLACK, COLOR_CYAN);
 
-    attrset(COLOR_PAIR(1) | A_BOLD);
+    /*
+     * Layout: independent top-level windows (newwin), NOT overlapping subwins
+     * of stdscr. Each panel is a bordered outer window (*0) with a derwin
+     * content area (inner) inset by one cell. Because the panels do not share
+     * cells with each other, refreshing one panel cannot corrupt another --
+     * this fixes the display bleed seen during long runs.
+     *
+     * Grid (stdscr border kept):
+     *   row 1            : header (full width)
+     *   rows 2..LINES/2  : CQ (left half) | Status (right half)
+     *   rows LINES/2..-4 : QSO (left half) | Traffic (right half)
+     *   bottom 3 rows    : command line (full width)
+     */
+    int topH = LINES / 2 - 2;         // height of the CQ/Status row
+    int midY = 2 + topH;              // first row of the QSO/Traffic row
+    int midH = (LINES - 4) - midY;    // height of the QSO/Traffic row
+    int leftW = COLS / 2 - 1;         // width of the left column
+    int rightW = COLS - 2 - leftW;    // width of the right column (fills remainder)
+
+    header = newwin(1, COLS - 2, 1, 1);
+
+    /* Top row: CQ (left), Status (right) */
+    cqW0 = newwin(topH, leftW, 2, 1);
+    statusW0 = newwin(topH, rightW, 2, 1 + leftW);
+
+    /* Middle row: QSO (left), Traffic (right) */
+    qso0 = newwin(midH, leftW, midY, 1);
+    trafficW0 = newwin(midH, rightW, midY, 1 + leftW);
+
+    /* Command line (full width) */
+    call0 = newwin(3, COLS - 2, LINES - 4, 1);
+
+    /* Inner content areas (inset by 1 on every side) */
+    cqW = derwin(cqW0, topH - 2, leftW - 2, 1, 1);
+    statusW = derwin(statusW0, topH - 2, rightW - 2, 1, 1);
+    qso = derwin(qso0, midH - 2, leftW - 2, 1, 1);
+    trafficW = derwin(trafficW0, midH - 2, rightW - 2, 1, 1);
+    call = derwin(call0, 1, COLS - 4, 1, 1);
+
+    trafficWLines = midH - 2;  // scrollable content lines
+    qsoWLines = midH - 2;
+
+    /* Border/title attributes on the outer windows */
     wattrset(trafficW0, COLOR_PAIR(3) | A_BOLD);
     wattrset(cqW0, COLOR_PAIR(3) | A_BOLD);
     wattrset(qso0, COLOR_PAIR(3) | A_BOLD);
     wattrset(call0, COLOR_PAIR(4) | A_BOLD);
     wattrset(statusW0, COLOR_PAIR(3) | A_BOLD);
 
+    /* stdscr outer border */
+    attrset(COLOR_PAIR(1) | A_BOLD);
     box(stdscr, 0, 0);
+    wnoutrefresh(stdscr);
 
-    box(trafficW0, 0, 0);
-    box(cqW0, 0, 0);
-
-    box(qso0, 0, 0);
-
-    box(call0, 0, 0);
-
-    box(statusW0, 0, 0);
-
+    /* Header line */
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
-    /* Print the header */
-    mvwprintw(header, 0, 1, "%s - %s  %dHz\n", dec_options.rcall, dec_options.rloc, qsoFreq);
+    mvwprintw(header, 0, 1, "%s - %s  %dHz", dec_options.rcall, dec_options.rloc, qsoFreq);
+    mvwprintw(header, 0, COLS / 2 - 12, "rtlsdr FT8 %s - QSO Mode", rtlsdr_ft8d_version);
 
-    mvwprintw(header, 0, COLS / 2 - 12, "rtlsdr FT8 %s - QSO Mode\n", rtlsdr_ft8d_version);
-
-    //   mvwprintw(header, 0, COLS - 23, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-
-    mvwprintw(cqW0, 0, 10, " CQ Reply Mode ");
-
+    /* Content windows: normal attr + scrolling */
     wattrset(trafficW, A_NORMAL);
     wattrset(cqW, A_NORMAL);
     wattrset(qso, A_NORMAL);
@@ -206,31 +220,24 @@ int init_ncurses(uint32_t initialFreq) {
 
     scrollok(trafficW, true);
     idlok(trafficW, true);
-
     scrollok(cqW, true);
     idlok(cqW, true);
-
     scrollok(qso, true);
     idlok(qso, true);
 
-    /* Headers */
-    box(trafficW0, 0, 0);
-    mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
-    wrefresh(trafficW0);
+    /* Keyboard is polled non-blocking on the UI thread (CQHandler) */
+    nodelay(call, true);
+    keypad(call, true);
 
-    box(statusW0, 0, 0);
-    mvwprintw(statusW0, 0, 10, " Transceiver Status ");
-    wrefresh(statusW0);
-
-    box(qso0, 0, 0);
-    mvwprintw(qso0, 0, 10, " Ongoing QSO ");
-    wrefresh(qso0);
-
-    box(cqW0, 0, 0);
-    mvwprintw(cqW0, 0, 10, " Incoming CQ ");
-    wrefresh(cqW0);
-
-    refresh();
+    /* Draw the panel borders + titles once and stage everything */
+    refreshBoxes();
+    wnoutrefresh(header);
+    wnoutrefresh(cqW);
+    wnoutrefresh(statusW);
+    wnoutrefresh(qso);
+    wnoutrefresh(trafficW);
+    wnoutrefresh(call);
+    doupdate();
 
     sprintf(txString, "");
     sprintf(editString, "");
@@ -385,7 +392,6 @@ void *TXHandler(void *vargp) {
     struct sockaddr_un serv_addr;
 
     FT8Msg Txletter, Rxletter;
-    char key = 0;
 
     txStatusFlag = TX_IDLE;
 
@@ -414,7 +420,6 @@ void *TXHandler(void *vargp) {
                 perror("Error, nothing read");
             }
             txStatusFlag = TX_WAITING;
-            tsq_push(kbd_queue, &KBDlock, key);
 
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
@@ -423,8 +428,6 @@ void *TXHandler(void *vargp) {
             txStatusFlag = TX_ONGOING;
             setTransmitting();
 
-            tsq_push(kbd_queue, &KBDlock, key);
-
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
                 perror("Error, nothing read");
@@ -432,11 +435,9 @@ void *TXHandler(void *vargp) {
             txStatusFlag = TX_END;
             resetTransmitting();
 
-            tsq_push(kbd_queue, &KBDlock, key);
             sleep(1);
 
             txStatusFlag = TX_IDLE;
-            tsq_push(kbd_queue, &KBDlock, key);
 
             // closing the connected socket
             close(client_fd);
@@ -490,130 +491,117 @@ void refreshStatus(bool refresh) {
 #define TAB 9
 #define ENTER 10
 
-/* KBD Handler Thread */
 /*
-Time for addition of Frequency Handling: when in Freetext mode, use the local Frequency
-When in CQ answer or in QSO mode, use the frequency from the CQ or QSO
-*/
-void *KBDHandler(void *vargp) {
-    static int status = IDLE;
-    FT8Msg Txletter;
+ * Keyboard state-machine, run ONLY on the UI thread (CQHandler).
+ * ncurses is not thread-safe, so all curses access -- rendering AND keyboard
+ * input -- lives on a single thread. processKey() contains no curses calls; it
+ * only mutates UI state (editString, activeWin, cqIdx) and toggles modes.
+ * Returns true if the display should be refreshed.
+ */
+static int kbdStatus = IDLE;
 
-    while (exitKBHThread == false) {
-        /* CQlock */
+static bool processKey(int rawKey) {
+    int key = toupper(rawKey);
+    int ix = strlen(editString);
 
-        nodelay(call, true);
-        int key;
-        while ((key = wgetch(call)) == ERR) {
-            usleep(10000);
-            if (exitKBHThread)
-                return NULL;
-        }
-        key = toupper(key);
-        int ix = strlen(editString);
+    switch (kbdStatus) {
+        case IDLE:
+            switch (key) {
+                case ESC1:
+                    kbdStatus = key;
+                    break;
 
-        switch (status) {
-            case IDLE:
-                switch (key) {
-                    case ESC1:
-                        status = key;
-                        key = 0;
-                        break;
+                case TAB:
+                    if (++activeWin > TXWIN)
+                        activeWin = CQWIN;
+                    break;
 
-                    case TAB:
-                        if (++activeWin > TXWIN)
-                            activeWin = CQWIN;
-                        // key = 0;
-                        break;
+                case ENTER:  // Parse the command and act on it
+                    if (!strcmp(editString, "AUTOCQ ON"))
+                        enableAutoCQ();
+                    if (!strcmp(editString, "AUTOCQ OFF"))
+                        disableAutoCQ();
 
-                    case ENTER:  // Parse the message and take a decision
-                        if (!strcmp(editString, "AUTOCQ ON"))
-                            enableAutoCQ();
-                        if (!strcmp(editString, "AUTOCQ OFF"))
-                            disableAutoCQ();
+                    if (!strcmp(editString, "PSK ON"))
+                        enableReporting();
+                    if (!strcmp(editString, "PSK OFF"))
+                        disableReporting();
 
-                        if (!strcmp(editString, "PSK ON"))
-                            enableReporting();
-                        if (!strcmp(editString, "PSK OFF"))
-                            disableReporting();
+                    if (!strcmp(editString, "AUTOREPLY ON"))
+                        enableAutoCQReply();
+                    if (!strcmp(editString, "AUTOREPLY OFF"))
+                        disableAutoCQReply();
 
-                        if (!strcmp(editString, "AUTOREPLY ON"))
-                            enableAutoCQReply();
-                        if (!strcmp(editString, "AUTOREPLY OFF"))
-                            disableAutoCQReply();
+                    if (!strcmp(editString, "AUTOQSO ON"))
+                        enableAutoQSO();
+                    if (!strcmp(editString, "AUTOQSO OFF"))
+                        disableAutoQSO();
 
-                        if (!strcmp(editString, "AUTOQSO ON"))
-                            enableAutoQSO();
-                        if (!strcmp(editString, "AUTOQSO OFF"))
-                            disableAutoQSO();
+                    if (!strcmp(editString, "SLOT ODD"))
+                        setActiveSlot(odd);
 
-                        if (!strcmp(editString, "SLOT ODD"))
-                            setActiveSlot(odd);
+                    if (!strcmp(editString, "SLOT EVEN"))
+                        setActiveSlot(even);
 
-                        if (!strcmp(editString, "SLOT EVEN"))
-                            setActiveSlot(even);
+                    if (!strcmp(editString, "QUIT"))
+                        programQuit();
 
-                        if (!strcmp(editString, "QUIT"))
-                            programQuit();
+                    editString[0] = '\0';
+                    break;
 
-                        sprintf(editString, "");
-                        /*
-                                                pthread_mutex_lock(&TXlock);  // Protect key queue structure
-                                                tx_queue.push_back(Txletter);
-                                                pthread_mutex_unlock(&TXlock);  // Protect key queue structure
-                                                */
-                        break;
-                    case DEL:
-                        if (ix)
-                            editString[ix - 1] = 0;
-                        break;
+                case DEL:
+                    if (ix)
+                        editString[ix - 1] = 0;
+                    break;
 
-                    default:
-                        if (ix < MAXTXSTRING - 1) {  /* Guard against buffer overflow */
-                            editString[ix] = key;
-                            editString[ix + 1] = 0;
-                        }
-                }
-                // wprintw(qso, "Key Pressed %d, editString %s\n", key, editString);
-                // wrefresh(qso);
-                break;
-            case ESC1:
-                if (key == ESC2) {
-                    status = key;
-                    key = 0;
-                } else
-                    status = IDLE;
-                break;
-            case ESC2:
-                if (activeWin == CQWIN) {
-                    if (key == UP) {
-                        if (cqIdx)
-                            cqIdx--;
+                default:
+                    if (ix < MAXTXSTRING - 1) {  /* Guard against buffer overflow */
+                        editString[ix] = (char)key;
+                        editString[ix + 1] = 0;
                     }
-                    if (key == DOWN) {
-                        if (cqFirst < cqLast) {
-                            if (cqIdx < (cqLast - 1))
-                                cqIdx++;
-                        } else if (cqIdx < (trafficWLines - 1))
+            }
+            break;
+
+        case ESC1:
+            if (key == ESC2)
+                kbdStatus = key;
+            else
+                kbdStatus = IDLE;
+            break;
+
+        case ESC2:
+            if (activeWin == CQWIN) {
+                if (key == UP) {
+                    if (cqIdx)
+                        cqIdx--;
+                }
+                if (key == DOWN) {
+                    if (cqFirst < cqLast) {
+                        if (cqIdx < (cqLast - 1))
                             cqIdx++;
-                    }
-                    key = 0;
+                    } else if (cqIdx < (trafficWLines - 1))
+                        cqIdx++;
                 }
-                status = IDLE;
-                break;
+            }
+            kbdStatus = IDLE;
+            break;
 
-            default:
-                status = IDLE;
-        }
-
-        // wprintw(qso, "Key Pressed %d\n", key);
-        // wprintw(qso, "Active Win %d\n", activeWin);
-        // wrefresh(qso);
-
-        tsq_push(kbd_queue, &KBDlock, (char)key);
-        usleep(10000);                   // Wait 10msec
+        default:
+            kbdStatus = IDLE;
     }
 
+    return true;  // a keypress always warrants a redraw
+}
+
+/*
+ * Legacy keyboard thread -- now a no-op. Keyboard input is handled on the UI
+ * thread (CQHandler) via processKey() so that ncurses is only ever touched by
+ * one thread. Kept as a thread body so main()'s create/join symmetry is intact.
+ */
+void *KBDHandler(void *vargp) {
+    while (exitKBHThread == false) {
+        usleep(100000);
+    }
     return NULL;
 }
 
@@ -783,7 +771,6 @@ void *CQHandler(void *vargp) {
     uint32_t clockRefresh = 60;
 
     while (exitCQThread == false) {
-        char key;
         struct decoder_results dr;
         struct plain_message qsoMsg;
         struct plain_message logMsg;
@@ -796,12 +783,12 @@ void *CQHandler(void *vargp) {
             printCQ(&dr);
             termRefresh = true;
         }
-        if (tsq_pop(kbd_queue, &KBDlock, &key)) {
-            /*
-                        if (key == TAB)
-                            focusOnWin(activeWin);
-            */
-            termRefresh = true;
+        /* Poll the keyboard on the UI thread (ncurses is single-threaded here).
+           Drain all pending keys this iteration. */
+        int key;
+        while ((key = wgetch(call)) != ERR) {
+            if (processKey(key))
+                termRefresh = true;
         }
         if (tsq_pop(qso_queue, &QSOlock, &qsoMsg)) {
             printQSORemote(&qsoMsg);
