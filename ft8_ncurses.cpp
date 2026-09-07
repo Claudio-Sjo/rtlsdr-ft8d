@@ -93,19 +93,21 @@ void refreshBoxes(void) {
 
     box(trafficW0, 0, 0);
     mvwprintw(trafficW0, 0, 10, " FT8 Traffic ");
-    wrefresh(trafficW0);
+    wnoutrefresh(trafficW0);
 
     box(statusW0, 0, 0);
     mvwprintw(statusW0, 0, 10, " Transceiver Status ");
-    wrefresh(statusW0);
+    wnoutrefresh(statusW0);
 
     box(qso0, 0, 0);
     mvwprintw(qso0, 0, 10, " Ongoing QSO ");
-    wrefresh(qso0);
+    wnoutrefresh(qso0);
 
     box(cqW0, 0, 0);
     mvwprintw(cqW0, 0, 10, " Incoming CQ ");
-    wrefresh(cqW0);
+    wnoutrefresh(cqW0);
+
+    wnoutrefresh(stdscr);
 }
 
 int init_ncurses(uint32_t initialFreq) {
@@ -238,6 +240,87 @@ int init_ncurses(uint32_t initialFreq) {
 
     /* End initialization */
     return (0);
+}
+
+/*
+ * Show a centered splash window for ~5 seconds at startup.
+ * Green border, yellow text. Reports the detected RTL-SDR device (or that
+ * none was found), the build architecture (x86 or ARM) and the SW version.
+ */
+void showSplash(bool deviceFound, const char *deviceInfo, const char *swVersion) {
+/* Build architecture string, resolved at compile time.
+   The Makefile passes -Dx86 for PC builds and -DRPI1/-DRPI23/-DRPI4 for the Pi. */
+#if defined(x86) || defined(__x86_64__) || defined(__i386__)
+    const char *archStr = "x86 version";
+#elif defined(__aarch64__) || defined(__arm__) || defined(RPI1) || defined(RPI23) || defined(RPI4)
+    const char *archStr = "ARM version";
+#else
+    const char *archStr = "unknown-arch version";
+#endif
+
+    char line1[128];
+    if (deviceFound)
+        snprintf(line1, sizeof(line1), "RTL-SDR found: %s", deviceInfo ? deviceInfo : "unknown");
+    else
+        snprintf(line1, sizeof(line1), "No RTL-SDR device found!");
+
+    char line2[64];
+    snprintf(line2, sizeof(line2), "rtlsdr-ft8d %s  (%s)", swVersion ? swVersion : "?", archStr);
+
+    /* Size the window to the widest line, with padding and borders */
+    int innerW = (int)strlen(line1);
+    if ((int)strlen(line2) > innerW)
+        innerW = (int)strlen(line2);
+    int winW = innerW + 6;  // 2 borders + padding
+    int winH = 5;           // border + line1 + blank + line2 + border
+
+    if (winW > COLS - 2)
+        winW = COLS - 2;
+    if (winW < 20)
+        winW = 20;
+
+    int startY = (LINES - winH) / 2;
+    int startX = (COLS - winW) / 2;
+    if (startY < 0)
+        startY = 0;
+    if (startX < 0)
+        startX = 0;
+
+    WINDOW *splash = newwin(winH, winW, startY, startX);
+    if (splash == NULL)
+        return;
+
+    /* Green border */
+    wattrset(splash, COLOR_PAIR(3) | A_BOLD);
+    box(splash, 0, 0);
+
+    /* Yellow text, centered on each line */
+    wattrset(splash, COLOR_PAIR(1) | A_BOLD);
+    mvwprintw(splash, 1, (winW - (int)strlen(line1)) / 2, "%s", line1);
+    mvwprintw(splash, 3, (winW - (int)strlen(line2)) / 2, "%s", line2);
+
+    wrefresh(splash);
+
+    /* Keep it on screen for 5 seconds */
+    sleep(5);
+
+    /* Tear down the splash and restore the underlying UI.
+       touchwin() forces the covered windows to be fully redrawn; everything
+       is staged with wnoutrefresh() and flushed with a single doupdate(). */
+    werase(splash);
+    wnoutrefresh(splash);
+    delwin(splash);
+
+    touchwin(stdscr);
+    wnoutrefresh(stdscr);
+    refreshBoxes();
+    touchwin(header);   wnoutrefresh(header);
+    touchwin(statusW);  wnoutrefresh(statusW);
+    touchwin(cqW);      wnoutrefresh(cqW);
+    touchwin(trafficW); wnoutrefresh(trafficW);
+    touchwin(qso);      wnoutrefresh(qso);
+    touchwin(call);     wnoutrefresh(call);
+    doupdate();
 }
 
 int close_ncurses() {
@@ -393,7 +476,7 @@ void refreshStatus(bool refresh) {
     mvwprintw(statusW, 8, 3, "Commands: PSK ON/OFF, SLOT ODD/EVEN, AUTOCQ ON/OFF");
     mvwprintw(statusW, 9, 3, "          AUTOREPLY ON/OFF, AUTOQSO ON/OFF");
 
-    wrefresh(statusW);
+    wnoutrefresh(statusW);
 }
 
 #define IDLE 0
@@ -560,7 +643,7 @@ void printCQ(struct decoder_results *cqReq) {
             cqReq->snr,
             (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
 
-    wrefresh(cqW);
+    wnoutrefresh(cqW);
     wattrset(cqW, A_NORMAL);
 }
 
@@ -603,7 +686,7 @@ void printQSORemote(plain_message *logMsg) {
                 logMsg->message,
                 (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
     }
-    wrefresh(qso);
+    wnoutrefresh(qso);
     wattrset(qso, A_NORMAL);
 }
 
@@ -622,7 +705,7 @@ void displayTxString(char *txMessage) {
 
     wprintw(qso, "%s %s\n", timeString, txMessage);
 
-    wrefresh(qso);
+    wnoutrefresh(qso);
     wattrset(qso, A_NORMAL);
 }
 
@@ -643,7 +726,7 @@ void printClock(void) {
 
     mvwprintw(header, 0, COLS - 24, "%d-%02d-%02d %02d:%02d:%02d %s", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
               tm.tm_hour, tm.tm_min, tm.tm_sec, (thisSlot == odd) ? "O" : "E");
-    wrefresh(header);
+    wnoutrefresh(header);
 }
 
 void printLog(plain_message *logMsg) {
@@ -674,7 +757,7 @@ void printLog(plain_message *logMsg) {
             logMsg->message,
             (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
 
-    wrefresh(trafficW);
+    wnoutrefresh(trafficW);
     wattrset(trafficW, A_NORMAL);
 }
 
@@ -689,7 +772,7 @@ void printCall(bool refresh) {
     waddstr(call, "CMD>");
     waddstr(call, editString);
 
-    wrefresh(call);
+    wnoutrefresh(call);
     wattrset(call, A_NORMAL);
 }
 
@@ -728,19 +811,21 @@ void *CQHandler(void *vargp) {
         printCall(termRefresh);
         refreshStatus(termRefresh);
 
+        /* Refresh the clock about once per second (it only shows seconds).
+           The loop runs every 10 ms, so 100 iterations ~= 1 s. */
+        bool needUpdate = termRefresh;
         if (clockRefresh-- == 0) {
             printClock();
-            clockRefresh = 20;
-            wrefresh(stdscr);
-            refreshBoxes();
-            refresh();
-        } else {
-            if (termRefresh) {
-                wrefresh(stdscr);
-                refreshBoxes();
-                refresh();
-            }
+            clockRefresh = 100;
+            needUpdate = true;
         }
+
+        /* Single coalesced flush to the terminal, only when something changed.
+           The static window borders are drawn once at init and are not
+           repainted here, which keeps SSH traffic minimal. */
+        if (needUpdate)
+            doupdate();
+
         termRefresh = false;
 
         usleep(10000); /* Wait 10 msec.*/

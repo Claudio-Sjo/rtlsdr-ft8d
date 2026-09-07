@@ -13,11 +13,19 @@ LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 #PI_VERSION = -DRPI23
 #endif
 
-# Identify Raspbery Pi Version
+# Identify the target architecture / Raspberry Pi Version
 
 CPUINFO := $(shell cat /proc/cpuinfo)
+MACHINE := $(shell uname -m)
 
-ifeq ($(findstring ARMv6,$(CPUINFO)),ARMv6)
+# x86 hosts (PC build): receiver only. The FT8 transmitter (ft8) drives the
+# Raspberry Pi's PLLD/GPCLK0 via BCM DMA and cannot run on x86, so it and its
+# socket-client helpers (client, sk150lm_beacon) are not built here.
+ifneq ($(filter x86_64 i386 i686,$(MACHINE)),)
+PI_VERSION = -Dx86
+IS_X86 = 1
+
+else ifeq ($(findstring ARMv6,$(CPUINFO)),ARMv6)
 # Raspberry Pi 1
 PI_VERSION = -DRPI1 --target=arm-linux-gnueabihf -mcpu=arm1176jzf-s -mfloat-abi=hard
 
@@ -43,7 +51,13 @@ OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft
 OBJCLI = client.o
 OBJSK  = sk150lm_beacon.o
 
+# On x86 (PC) only the receiver is built; on the Pi the transmitter and its
+# helpers are built as well.
+ifdef IS_X86
+TARGETS = rtlsdr_ft8d
+else
 TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon
+endif
 
 .PHONY: all clean
 
@@ -76,10 +90,15 @@ sk150lm_beacon: $(OBJSK)
 
 
 clean:
-	rm -f *.o ft8_lib/ft8/*.o $(TARGETS) fftw_wisdom.dat selftest.iq
+	rm -f *.o ft8_lib/ft8/*.o rtlsdr_ft8d ft8 client sk150lm_beacon fftw_wisdom.dat selftest.iq
 
+ifdef IS_X86
+install:
+	install rtlsdr_ft8d /usr/local/bin/rtlsdr_ft8d
+else
 install:
 	install rtlsdr_ft8d /usr/local/bin/rtlsdr_ft8d
 	install ft8 /usr/local/bin/ft8
 	install ft8tx.service /etc/systemd/system/ft8tx.service
 	systemctl enable ft8tx.service
+endif

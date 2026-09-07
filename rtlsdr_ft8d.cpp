@@ -116,8 +116,8 @@ pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.7.0";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.7.0";
+const char *rtlsdr_ft8d_version = "0.8.2";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.8.2";
 
 static volatile int callback_counter = 0;
 static volatile int callback_cnt_old = 0;
@@ -354,6 +354,9 @@ void initrx_options() {
     rx_options.readfile = false;
     rx_options.noreport = false;  // When debugging no report
     rx_options.qso = true;
+    rx_options.isHF = false;
+    rx_options.directset = false;
+    rx_options.rtlgen = rtlAuto;
 }
 
 void initFFTW() {
@@ -1182,6 +1185,39 @@ bool startRtlDevice(char *resultText) {
         sprintf(resultText, "Cannot open device\n");
         return false;
     }
+
+    /* Determine the RTL-SDR generation so HF can pick the right reception path:
+       - v3 (R820T2, reported as R820T) uses Q-branch direct sampling on HF (-d 2)
+       - v4 (R828D) has an internal upconverter: direct sampling must stay OFF,
+         we simply tune to the HF frequency and the driver handles the rest.
+       Autodetected from the tuner type, overridable with --rtl3 / --rtl4. */
+    rtl_gen_t gen = rx_options.rtlgen;
+    if (gen == rtlAuto) {
+        enum rtlsdr_tuner tuner = rtlsdr_get_tuner_type(rtl_device);
+        gen = (tuner == RTLSDR_TUNER_R828D) ? rtlV4 : rtlV3;
+        LOG(LOG_INFO, "RTL tuner type %d detected -> assuming RTL-SDR %s\n",
+            (int)tuner, (gen == rtlV4) ? "v4" : "v3");
+    } else {
+        LOG(LOG_INFO, "RTL generation forced to %s by option\n",
+            (gen == rtlV4) ? "v4" : "v3");
+    }
+
+    /* Choose the HF direct-sampling mode unless the user forced -d explicitly */
+    if (rx_options.isHF && !rx_options.directset) {
+        if (gen == rtlV4)
+            rx_options.directsampling = 0;  // v4 internal upconverter: no direct sampling
+        else
+            rx_options.directsampling = 2;  // v3 Q-branch direct sampling
+    }
+
+    /* Report the detected device back to the caller (name + generation) */
+    {
+        const char *devName = rtlsdr_get_device_name(rx_options.device);
+        snprintf(resultText, 96, "%s (RTL-SDR %s)",
+                 (devName && devName[0]) ? devName : "RTL device",
+                 (gen == rtlV4) ? "v4" : "v3");
+    }
+
     if (rx_options.autogain)
         rtl_result = rtlsdr_set_tuner_gain_mode(rtl_device, 0);
     else
@@ -1250,6 +1286,10 @@ void usage(FILE *stream, int32_t status) {
             "\t-p crystal correction factor (ppm) (default: 0)\n"
             "\t-u upconverter (default: 0, example: 125M)\n"
             "\t-d direct dampling [0,1,2] (default: 0, 1 for I input, 2 for Q input)\n"
+            "\t   (v3-only; on HF it is selected automatically per RTL generation)\n"
+            "\t--rtl3 force RTL-SDR v3 behaviour (R820T2, Q-branch direct sampling on HF)\n"
+            "\t--rtl4 force RTL-SDR v4 behaviour (R828D, internal upconverter on HF)\n"
+            "\t   (by default the RTL generation is autodetected from the tuner type)\n"
             "\t-n max iterations (default: 0 = infinite loop)\n"
             "\t-i device index (in case of multiple receivers, default: 0)\n"
             "Debugging options:\n"
@@ -1273,6 +1313,8 @@ int main(int argc, char **argv) {
     struct option long_options[] = {
         {"help", no_argument, 0, 0},
         {"version", no_argument, 0, 0},
+        {"rtl3", no_argument, 0, 0},
+        {"rtl4", no_argument, 0, 0},
         {0, 0, 0, 0}};
 
     int32_t rtl_result;
@@ -1302,49 +1344,45 @@ int main(int argc, char **argv) {
                         printf("rtlsdr_ft8d v%s\n", rtlsdr_ft8d_version);
                         exit(EXIT_FAILURE);
                         break;
+                    case 2:  // --rtl3 : force RTL-SDR v3 (R820T2) behaviour
+                        rx_options.rtlgen = rtlV3;
+                        break;
+                    case 3:  // --rtl4 : force RTL-SDR v4 (R828D) behaviour
+                        rx_options.rtlgen = rtlV4;
+                        break;
                 }
                 break;  /* Prevent fall-through into 'f' with a NULL optarg */
             case 'f':  // Frequency
                 if (!strcasecmp(optarg, "160m")) {
                     rx_options.dialfreq = 1840000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "80m")) {
                     rx_options.dialfreq = 3573000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "60m")) {
                     rx_options.dialfreq = 5357000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "40m")) {
                     rx_options.dialfreq = 7074000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "30m")) {
                     rx_options.dialfreq = 10136000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "20m")) {
                     rx_options.dialfreq = 14074000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "17m")) {
                     rx_options.dialfreq = 18100000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "15m")) {
                     rx_options.dialfreq = 21074000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "12m")) {
                     rx_options.dialfreq = 24915000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "10m")) {
                     rx_options.dialfreq = 28074000;
-                    if (!rx_options.directsampling)
-                        rx_options.directsampling = 2;
+                    rx_options.isHF = true;
                 } else if (!strcasecmp(optarg, "6m")) {
                     rx_options.dialfreq = 50313000;
                 } else if (!strcasecmp(optarg, "4m")) {
@@ -1359,6 +1397,9 @@ int main(int argc, char **argv) {
                     rx_options.dialfreq = 1296174000;
                 } else {
                     rx_options.dialfreq = (uint32_t)atofs(optarg);
+                    /* Raw frequency below 30 MHz is treated as HF */
+                    if (rx_options.dialfreq && rx_options.dialfreq < 30000000)
+                        rx_options.isHF = true;
                 }
                 break;
             case 'c':  // Callsign
@@ -1387,6 +1428,7 @@ int main(int argc, char **argv) {
                 break;
             case 'd':  // Direct Sampling
                 rx_options.directsampling = (uint32_t)atofs(optarg);
+                rx_options.directset = true;
                 break;
             case 'n':  // Stop after n iterations
                 rx_options.maxloop = (uint32_t)atofs(optarg);
@@ -1497,12 +1539,18 @@ int main(int argc, char **argv) {
     signal(SIGABRT, &sigint_callback_handler);
 
     /* Init & parameter the device */
-    char rtlDevResult[32];
+    char rtlDevResult[96];
 
-    if (!startRtlDevice(rtlDevResult)) {
+    bool rtlOk = startRtlDevice(rtlDevResult);
+
+    /* Show a centered splash for 5s: device found (or not), arch and version */
+    if (rx_options.qso)
+        showSplash(rtlOk, rtlDevResult, rtlsdr_ft8d_version);
+
+    if (!rtlOk) {
         wprintw(trafficW, "%s\n", rtlDevResult);
         wrefresh(trafficW);
-        sleep(3);
+        sleep(1);
         return exit_ft8(rx_options.qso, EXIT_FAILURE);
     }
 

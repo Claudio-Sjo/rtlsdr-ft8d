@@ -22,6 +22,7 @@ void *KBDHandler(void *vargp);
 void *TXHandler(void *vargp);
 void printHeaders(void);
 void displayTxString(char *txMsg);
+void showSplash(bool deviceFound, const char *deviceInfo, const char *swVersion);
 
 void close_TxThread(void);
 void close_KbhThread(void);

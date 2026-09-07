@@ -115,6 +115,13 @@ struct receiver_state {
     struct tm gtm;
 };
 
+/* RTL device generation, used to pick the right HF reception path */
+typedef enum _rtl_gen_t {
+    rtlAuto = 0, /* Autodetect from the tuner type (default) */
+    rtlV3,       /* Force v3 behaviour (R820T2, Q-branch direct sampling on HF) */
+    rtlV4        /* Force v4 behaviour (R828D, internal upconverter on HF) */
+} rtl_gen_t;
+
 struct receiver_options {
     uint32_t dialfreq;
     uint32_t realfreq;
@@ -132,6 +139,9 @@ struct receiver_options {
     bool writefile;
     bool readfile;
     bool qso;
+    bool isHF;         /* True when an HF band was selected (needs v3/v4 handling) */
+    bool directset;    /* True when the user explicitly set -d (do not auto-override) */
+    rtl_gen_t rtlgen;  /* Forced RTL generation, or rtlAuto to detect */
     char *filename;
 };
 
