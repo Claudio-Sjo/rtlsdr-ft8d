@@ -561,7 +561,7 @@ void addQso(struct plain_message *newQso) {
         sprintf(currentQSO.dest, "%s", newQso->dest);  // This is the local callId
         sprintf(currentQSO.message, "%s", newQso->message);
         currentQSO.freq = newQso->freq;
-        currentQSO.snr = newQso->snr - 20;  // This is to fix data in dBm
+        currentQSO.snr = newQso->snr;  // real SNR estimate (dB)
         currentQSO.tempus = newQso->tempus;
         currentQSO.ft8slot = newQso->ft8slot;
 
@@ -648,7 +648,7 @@ void addCQ(struct plain_message *newQso) {
     sprintf(currentQSO.dest, "");
     sprintf(currentQSO.message, "CQ");
     currentQSO.freq = newQso->freq;
-    currentQSO.snr = newQso->snr - 20;  // Adjust the value
+    currentQSO.snr = newQso->snr;  // real SNR estimate (dB)
     currentQSO.tempus = newQso->tempus;
     currentQSO.ft8slot = newQso->ft8slot;
 

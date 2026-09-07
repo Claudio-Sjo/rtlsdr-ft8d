@@ -1,5 +1,34 @@
 ## CHANGELOG
 
+### 0.8.3
+
+- **Real SNR estimate.** The reported SNR was previously the Costas sync
+  correlation score minus a constant (it clustered around 14-15 dB and was
+  not a true SNR). It is now estimated in dB referenced to a 2500 Hz noise
+  bandwidth (WSJT-X convention): signal power is measured at the known Costas
+  sync tones, and noise from a robust slot-wide median floor (immune to
+  signals scaling together). The scattered `-20` display/report offsets were
+  removed accordingly, so the value shown in the UI, logged to ADIF and sent
+  to PSKReporter is the same physically meaningful dB figure.
+- **Implemented the callsign hash table.** Previously stubbed, so nonstandard
+  and compound callsigns (transmitted by FT8 as 22/12/10-bit hashes) showed as
+  `<...>`. They are now stored and resolved to text. Hash-resolved calls are
+  stripped of their angle brackets before display, QSO matching and logging.
+- **Synthetic receiver test mode (`--rx-test`).** Generates a realistic FT8
+  slot every 15 s containing a varying 4-5 signals (mixed CQ and directed
+  messages, A1TEST-family calls, spread across the audio passband and a range
+  of amplitudes/SNRs), driving the full decode -> UI -> QSO -> logging pipeline
+  with no RTL-SDR hardware. Reporting is forced off in this mode so synthetic
+  spots can never reach the live PSKReporter database.
+- **UI reworked to non-overlapping windows.** The ncurses layout used
+  overlapping `subwin()` panels that shared cell memory and corrupted the
+  display during long runs; each panel is now an independent `newwin()` with an
+  inset content area, eliminating the bleed.
+- **All ncurses access moved to a single thread.** ncurses is not
+  thread-safe; keyboard input (`wgetch`) previously ran in a separate thread
+  concurrently with rendering, corrupting the display over time. Keyboard
+  polling is now handled on the UI thread, so only one thread touches curses.
+
 ### 0.8.2
 
 - **Reduced terminal refresh traffic (SSH responsiveness).** The ncurses UI

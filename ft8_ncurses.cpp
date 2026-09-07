@@ -668,11 +668,11 @@ void printQSORemote(plain_message *logMsg) {
         wprintw(qso, "%s %dHz  %3ddB %s %s %s %s\n",
                 timeString,
                 logMsg->freq,
-                logMsg->snr - 20,
+                logMsg->snr,
                 logMsg->dest,
                 logMsg->src,
                 logMsg->message,
-                (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
+                (thisSlot == odd) ? "ODD " : "EVEN");  // snr is a real dB estimate
     }
     wnoutrefresh(qso);
     wattrset(qso, A_NORMAL);
@@ -739,11 +739,11 @@ void printLog(plain_message *logMsg) {
     wprintw(trafficW, "%s %dHz  %3ddB %s %s %s %s\n",
             timeString,
             logMsg->freq,
-            logMsg->snr - 20,
+            logMsg->snr,
             logMsg->dest,
             logMsg->src,
             logMsg->message,
-            (thisSlot == odd) ? "ODD " : "EVEN");  // -20dB already computed
+            (thisSlot == odd) ? "ODD " : "EVEN");  // snr is a real dB estimate
 
     wnoutrefresh(trafficW);
     wattrset(trafficW, A_NORMAL);

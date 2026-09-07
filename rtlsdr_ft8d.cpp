@@ -116,8 +116,8 @@ pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.8.2";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.8.2";
+const char *rtlsdr_ft8d_version = "0.8.3";
+char pskreporter_app_version[] = "rtlsdr-ft8d_v0.8.3";
 
 static volatile int callback_counter = 0;
 static volatile int callback_cnt_old = 0;
@@ -328,9 +328,14 @@ static void fillRxTestBuffer(uint32_t idx) {
                 break;
         }
 
-        /* Sum this signal into the window (amp lowered a bit since several
-           signals share the buffer; still well above the 0.02 noise floor) */
-        genFT8Signal(iS, qS, message, audio, 0.4f, 0.02f);
+        /* Sum this signal into the window at a per-signal amplitude so the
+           test exercises a range of SNRs (real bands have varied signal
+           strengths). Amplitudes span roughly a 4:1 range. */
+        /* Sum this signal into the window at a per-signal amplitude so the
+           synthetic traffic spans a realistic range of SNRs (like a real band
+           with strong and weak stations). */
+        float amp = 0.15f + 0.12f * (float)(s % 5);  // ~0.15 .. 0.63
+        genFT8Signal(iS, qS, message, audio, amp, 0.02f);
     }
 
     rx_state.iqIndex[idx] = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
@@ -550,7 +555,7 @@ void postSpots(uint32_t n_results) {
 
         snprintf(dr.call, sizeof(dr.call), "%.12s", dec_results[i].call);
         dr.freq = dec_results[i].freq + dec_options.freq;
-        dr.snr = dec_results[i].snr - 20;
+        dr.snr = dec_results[i].snr;  // real SNR estimate (dB)
         tsq_push(dec_results_queue, &lock, dr);
     }
 }
@@ -1101,6 +1106,101 @@ static const char *stripBrackets(const char *token, char *out, size_t outsz) {
     return out;
 }
 
+/*
+ * Compute a robust noise-floor power for the whole slot: the median of all
+ * waterfall bin powers. Signals occupy only a small fraction of the
+ * time/frequency cells, so the median is dominated by noise and is immune to
+ * signals scaling up/down (unlike using a candidate's neighbouring tone bins,
+ * which get contaminated by other signals). Returned as linear power.
+ */
+static double noiseFloorPower(const monitor_t *mon) {
+    const ftx_waterfall_t *wf = &mon->wf;
+    static float samples[8192];
+    int n = 0;
+    long total = (long)wf->num_blocks * wf->block_stride;
+    int step = (int)(total / 8192);
+    if (step < 1)
+        step = 1;
+    for (long i = 0; i < total && n < 8192; i += step) {
+        samples[n++] = (float)wf->mag[i] * 0.5f - 120.0f;  // dB
+    }
+    if (n == 0)
+        return 1e-12;
+
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (samples[j] < samples[i]) {
+                float t = samples[i];
+                samples[i] = samples[j];
+                samples[j] = t;
+            }
+    float medianDb = samples[n / 2];
+    return pow(10.0, medianDb / 10.0);
+}
+
+/*
+ * Estimate the SNR (in dB, referenced to a 2500 Hz noise bandwidth, WSJT-X
+ * convention) for a decoded candidate.
+ *
+ * The previous code reported (cand->score - 20), the Costas sync correlation
+ * score, which is not an SNR and clusters in a narrow range.
+ *
+ * Signal power is measured at the KNOWN Costas sync tones (21 symbols in 3
+ * groups at symbol indices 0..6, 36..42, 72..78), averaging the power in the
+ * true tone bin. Noise power is the robust slot-wide median floor passed in.
+ * SNR = 10*log10((Psig - Pnoise)/Pnoise), referenced from the tone-bin
+ * bandwidth (6.25/freq_osr Hz) to the 2500 Hz WSJT-X reference.
+ */
+static float estimateSNR(const monitor_t *mon, const ftx_candidate_t *cand, double noisePow) {
+    const ftx_waterfall_t *wf = &mon->wf;
+    const int sync_offsets[FT8_NUM_SYNC] = {0, FT8_SYNC_OFFSET, 2 * FT8_SYNC_OFFSET};
+
+    double sigSum = 0.0;
+    int nSig = 0;
+
+    for (int g = 0; g < FT8_NUM_SYNC; ++g) {
+        for (int s = 0; s < FT8_LENGTH_SYNC; ++s) {
+            int sym = sync_offsets[g] + s;
+            int block = cand->time_offset + sym;
+            if (block < 0 || block >= wf->num_blocks)
+                continue;
+
+            uint8_t costasTone = kFT8_Costas_pattern[s];
+            int bin = cand->freq_offset + costasTone * wf->freq_osr;
+            if (bin < 0 || bin >= wf->num_bins)
+                continue;
+
+            int base = block * wf->block_stride +
+                       cand->time_sub * (wf->freq_osr * wf->num_bins) +
+                       cand->freq_sub * wf->num_bins;
+
+            float db = (float)wf->mag[base + bin] * 0.5f - 120.0f;
+            sigSum += pow(10.0, db / 10.0);
+            nSig++;
+        }
+    }
+
+    if (nSig == 0 || noisePow < 1e-15)
+        return -24.0f;
+
+    double sigPlusNoise = sigSum / nSig;
+    double signal = sigPlusNoise - noisePow;
+    if (signal < 1e-12)
+        signal = 1e-12;
+
+    double snr_bin = 10.0 * log10(signal / noisePow);
+
+    /* Reference from the tone-bin bandwidth to 2500 Hz (WSJT-X convention). */
+    double binBW = (double)K_FSK_DEV / (double)wf->freq_osr;
+    double snr = snr_bin - 10.0 * log10(2500.0 / binBW);
+
+    if (snr < -24.0)
+        snr = -24.0;
+    if (snr > 49.0)
+        snr = 49.0;
+    return (float)snr;
+}
+
 void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_results *decodes, int32_t *n_results) {
     /* Get the slot type */
     struct timeval lTime;
@@ -1115,6 +1215,9 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     // Find top candidates by Costas sync score and localize them in time and frequency
     ftx_candidate_t candidate_list[K_MAX_CANDIDATES];
     int num_candidates = ftx_find_candidates(wf, K_MAX_CANDIDATES, candidate_list, K_MIN_SCORE);
+
+    /* Robust slot-wide noise floor for SNR estimation (computed once) */
+    double noisePow = noiseFloorPower(mon);
 
     // wprintw(trafficW, "Found %d candidates\n", num_candidates);
     // wrefresh(trafficW);
@@ -1163,6 +1266,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             }
             continue;
         }
+
+        /* Real SNR estimate (dB, 2500 Hz reference) for this candidate,
+           replacing the old (cand->score - 20) placeholder. */
+        int32_t estSnr = (int32_t)lroundf(estimateSNR(mon, cand, noisePow));
 
         LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
         // wprintw(trafficW, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
@@ -1290,7 +1397,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr ? strPtr : "");
 
                 decodes[num_decoded].freq = (int32_t)freq_hz + 1500;
-                decodes[num_decoded].snr = (int32_t)cand->score - 20;  // UPDATE: it's not true, score != snr
+                decodes[num_decoded].snr = estSnr;  // real SNR estimate (dB, 2500 Hz ref)
                 decodes[num_decoded].tempus = current_time;
 
                 pthread_mutex_unlock(&msglock);
@@ -1299,8 +1406,8 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
                 sprintf(qsoMsg.dest, "CQ");
                 qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                qsoMsg.ft8slot = thisSlot;          // This is useful only in QSO mode
-                qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
+                qsoMsg.snr = estSnr;        // real SNR estimate (dB)
                 qsoMsg.tempus = current_time;
 
                 tsq_push(qsoh_queue, &QSOHlock, qsoMsg);
@@ -1322,7 +1429,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg ? msg : "");
 
                     qsoMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-                    qsoMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+                    qsoMsg.snr = estSnr;  // real SNR estimate (dB)
 
                     qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
                     qsoMsg.tempus = current_time;
@@ -1345,7 +1452,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             snprintf(logMsg.message, sizeof(logMsg.message), "%s", logtxt ? logtxt : "");
 
             logMsg.freq = (int32_t)freq_hz + dec_options.freq + 1500;
-            logMsg.snr = (int32_t)cand->score;  // UPDATE: it's not true, score != snr
+            logMsg.snr = estSnr;  // real SNR estimate (dB)
             logMsg.tempus = current_time;
 
             tsq_push(log_queue, &LOGlock, logMsg);
