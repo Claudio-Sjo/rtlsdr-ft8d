@@ -1,5 +1,31 @@
 ## CHANGELOG
 
+### 0.8.4
+
+- **Unified version numbering.** The transmitter (`ft8`) previously carried its
+  own independent version string ("v 0.4"); it now shares a single
+  `RTLSDR_FT8D_VERSION` macro (in `rtlsdr_ft8d.h`) with the receiver, so both
+  binaries report the same project version and future bumps happen in one place.
+- **Fixed reception frequency reported ~200 Hz too high.** The decoded-frequency
+  formula added `mon.min_bin` to the candidate bin index, but `ft8_subsystem()`
+  fills its waterfall starting at FFT bin 0 (not at `min_bin`, as stock ft8_lib's
+  `monitor_process()` does). This double-counted `min_bin / symbol_period` and
+  shifted every reported frequency high by ~200 Hz. The term is now dropped so the
+  reported audio frequency matches the true signal. Verified with an internal
+  known-frequency calibration (offset removed to the Hz) and an RF loopback against
+  an exactly-known transmit frequency (round-trip error reduced from ~259 Hz to a
+  ~56 Hz residual, i.e. a few ppm of combined oscillator/tuning error, not a bug).
+- **Fixed spurious "Cannot open device" and self-termination during reception.**
+  The RX stall watchdog re-opened the RTL device with `rtlsdr_open()` while the
+  previous `rtlsdr_read_async()` thread still held the USB claim, so the reopen
+  always failed and the program quit. Worse, the watchdog false-tripped within the
+  first slot because it compared the callback counter only against its value one
+  loop iteration earlier. The watchdog now treats the RX as stalled only after no
+  USB callback for `RTL_STALL_TIMEOUT` (30 s, 2 FT8 slots), and recovery goes
+  through a new `restartRtlDevice()` that cancels the async read, joins the RX
+  thread and closes the handle before re-opening (also fixing an `rxThread` leak).
+  Up to `RTL_MAX_RESTART` clean restarts are attempted before giving up.
+
 ### 0.8.3
 
 - **Real SNR estimate.** The reported SNR was previously the Costas sync

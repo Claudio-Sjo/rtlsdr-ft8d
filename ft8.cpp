@@ -73,7 +73,7 @@ extern "C" {
 }
 #endif /* __cplusplus */
 
-#define PROGRAM "FT8/Wspr Transmitter Service v 0.4 2026-03-26"
+#define PROGRAM "FT8/Wspr Transmitter Service v " RTLSDR_FT8D_VERSION " 2026-03-26"
 
 // Note on accessing memory in RPi:
 //

@@ -116,8 +116,8 @@ pthread_mutex_t Ticklock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t QSOHlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Could be nice to update this one with the CI */
-const char *rtlsdr_ft8d_version = "0.8.3";
-char pskreporter_app_version[] = "rtlsdr-ft8d_v0.8.3";
+const char *rtlsdr_ft8d_version = RTLSDR_FT8D_VERSION;
+char pskreporter_app_version[] = "rtlsdr-ft8d_v" RTLSDR_FT8D_VERSION;
 
 static volatile int callback_counter = 0;
 static volatile int callback_cnt_old = 0;
