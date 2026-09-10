@@ -55,6 +55,12 @@
 // #define FT8_TXTIME 13000000    // 12.6 seconds in microseconds
 #define FT8_BUFRESET 15000000  // 15 seconds in microseconds
 
+/* RTL stall watchdog: only treat the RX as stalled when no USB callback has
+   arrived for this many seconds (>= 2 FT8 slots), and attempt a bounded number
+   of clean restarts before giving up. */
+#define RTL_STALL_TIMEOUT 30   // seconds without a callback before restarting
+#define RTL_MAX_RESTART 3      // consecutive failed restarts before quitting
+
 /* Possible PATIENCE options for FFTW:
  * - FFTW_ESTIMATE
  * - FFTW_ESTIMATE_PATIENT
@@ -209,3 +215,4 @@ bool exitFlag(void);
 
 void closeRtlDevice(void);
 bool startRtlDevice(char *resultText);
+bool restartRtlDevice(char *resultText);

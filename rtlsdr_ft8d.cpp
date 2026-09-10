@@ -121,7 +121,6 @@ char pskreporter_app_version[] = "rtlsdr-ft8d_v0.8.3";
 
 static volatile int callback_counter = 0;
 static volatile int callback_cnt_old = 0;
-
 /* Callback for each buffer received */
 static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx) {
     int8_t *sigIn = (int8_t *)samples;
@@ -1236,7 +1235,14 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
     for (int idx = 0; idx < num_candidates; ++idx) {
         const ftx_candidate_t *cand = &candidate_list[idx];
 
-        float freq_hz = (mon->min_bin + cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
+        /* The waterfall in ft8_subsystem() is filled starting at FFT bin 0
+           (see the "pos * K_FREQ_OSR + freq_sub" fill loop), so a candidate's
+           freq_offset already indexes from 0 Hz. The stock ft8_lib formula adds
+           mon->min_bin because monitor_process() fills the waterfall starting at
+           min_bin; adding it here double-counts and shifts every reported
+           frequency high by min_bin/symbol_period (~200 Hz). Drop it so the
+           reported audio frequency matches the true signal frequency. */
+        float freq_hz = (cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
         float time_sec = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
 
 #ifdef WATERFALL_USE_PHASE
@@ -1573,6 +1579,23 @@ bool startRtlDevice(char *resultText) {
     }
     pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
     return true;
+}
+
+/* Cleanly tear down the current RTL device and its async-read thread before
+   re-opening. The old code called startRtlDevice() (hence rtlsdr_open()) again
+   while the previous rtlsdr_rx() thread was still blocked inside
+   rtlsdr_read_async() holding the USB claim: the second open always failed with
+   "Cannot open device". It also leaked/overwrote rxThread on every restart.
+   Here we cancel the async read, join the thread, close the handle, then let
+   startRtlDevice() re-open and re-spawn the rx thread. */
+bool restartRtlDevice(char *resultText) {
+    if (rtl_device) {
+        rtlsdr_cancel_async(rtl_device);  /* unblocks rtlsdr_read_async in rtlsdr_rx */
+        pthread_join(rxThread, NULL);     /* wait for the rx thread to return */
+        rtlsdr_close(rtl_device);
+        rtl_device = NULL;
+    }
+    return startRtlDevice(resultText);
 }
 
 void usage(FILE *stream, int32_t status) {
@@ -1953,6 +1976,11 @@ int main(int argc, char **argv) {
     /*  - Decoder thread must be started at second 12.6 whilst buffer has to be reset at sec 15
         - Buffer also can be shorter, thus we may reset the bufferIndex twice
     */
+    /* RTL stall watchdog state: remember the last observed callback count and
+       the wall-clock time it last advanced, plus how many restarts have failed. */
+    int lastSeenCbCount = callback_counter;
+    time_t lastCbChange = time(NULL);
+    int restartFailures = 0;
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
         if (rx_options.rxtest) {
             /* Synthetic slot: honour the real 15 s FT8 timing. Wait until the
@@ -2024,16 +2052,38 @@ int main(int argc, char **argv) {
 
         usleep(100000); /* Give a chance to the other thread to update the nloop counter */
 
-        // Test!!!
-        if (callback_counter == callback_cnt_old) {
-            /* Try to restart the device */
+        /* RTL stall watchdog. The RX async callback bumps callback_counter on
+           every USB buffer. Instead of the old per-iteration equality test
+           (which false-tripped around the slot boundary and then quit on the
+           first failed reopen), only act when the counter has not advanced for
+           at least RTL_STALL_TIMEOUT seconds, and then attempt a *clean*
+           restart (cancel async + join rx thread + close before re-open). */
+        int nowCb = callback_counter;
+        time_t nowT = time(NULL);
+        if (nowCb != lastSeenCbCount) {
+            lastSeenCbCount = nowCb;
+            lastCbChange = nowT;
+            restartFailures = 0;
+        } else if ((nowT - lastCbChange) >= RTL_STALL_TIMEOUT) {
             char errorTxt[32];
-
-            if (!startRtlDevice(errorTxt)) {
-                wprintw(trafficW, "%s\n", errorTxt);
-                wrefresh(trafficW);
-                rx_state.exit_flag = true;
-                sleep(3);
+            LOG(LOG_WARN, "RX stalled for %lds, restarting device (attempt %d/%d)\n",
+                (long)(nowT - lastCbChange), restartFailures + 1, RTL_MAX_RESTART);
+            if (restartRtlDevice(errorTxt)) {
+                /* Restart succeeded: reset the stall timer */
+                lastSeenCbCount = callback_counter;
+                lastCbChange = time(NULL);
+                restartFailures = 0;
+            } else {
+                if (++restartFailures >= RTL_MAX_RESTART) {
+                    wprintw(trafficW, "%s\n", errorTxt);
+                    wrefresh(trafficW);
+                    rx_state.exit_flag = true;
+                    sleep(3);
+                } else {
+                    /* Give the USB stack a moment before the next attempt */
+                    lastCbChange = time(NULL);
+                    sleep(1);
+                }
             }
         }
         callback_cnt_old = callback_counter;
@@ -2045,8 +2095,10 @@ int main(int argc, char **argv) {
 
     if (rx_options.rxtest) {
         /* Synthetic source runs in the main loop; nothing to join */
-    } else {
-        /* Stop the RX and free the blocking function */
+    } else if (rtl_device) {
+        /* Stop the RX and free the blocking function. If a failed restart
+           already closed the device and joined rxThread, rtl_device is NULL
+           and we must not touch it or double-join the thread. */
         rtlsdr_cancel_async(rtl_device);
         rtlsdr_close(rtl_device);
     }
@@ -2056,7 +2108,7 @@ int main(int argc, char **argv) {
 
     /* Wait the thread join (send a signal before to terminate the job) */
     pthread_join(decThread.thread, NULL);
-    if (!rx_options.rxtest)
+    if (!rx_options.rxtest && rtl_device)
         pthread_join(rxThread, NULL);
 
     /* Destroy QSO handler */
