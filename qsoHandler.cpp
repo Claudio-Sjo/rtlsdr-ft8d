@@ -75,33 +75,33 @@ extern std::vector<FT8Msg> tx_queue;
 #define QUERYCQDELAY 3    // in quarter of a minute
 
 /*
- * FT8 transmit band.
+ * FT8 transmit band (USB convention, as used by WSJT-X).
  *
- * The FT8 signal occupies a band only ~200 Hz wide, centred on the dial
- * frequency: permitted RF is dial +/- FT8_BAND_HALFWIDTH (e.g. for the 20 m
- * dial 14.074.000 the signal must lie between 14.073.900 and 14.074.100).
+ * FT8 is upper-sideband: the band "dial" frequency is the suppressed-carrier
+ * USB dial, and the activity sits ~1500 Hz above it in audio. The transmit
+ * CENTRE is therefore dial + FT8_USB_CENTER (e.g. 20 m: 14.074.000 + 1500 =
+ * 14.075.500). The usable FT8 band is only ~200 Hz wide, i.e.
+ * dial + 1500 +/- FT8_BAND_HALFWIDTH.
  *
- * IMPORTANT: the dial is the CENTRE of the band, not a lower edge, and the
- * transmit frequency must NOT include the receiver's 1500 Hz conversion offset
- * (that offset belongs only to the RX tuning/demodulation chain, where the
- * front end is tuned ~1.5 kHz low so the signal lands above zero after the
- * final conversion -- it has nothing to do with where we transmit).
+ * The receiver reports decoded signals as dial + audio, where a band-centre
+ * signal has audio ~1500, so a received signal and our transmit frequency use
+ * the same absolute-RF convention.
  */
+#define FT8_USB_CENTER 1500     // Hz, USB audio centre of the FT8 activity
 #define FT8_BAND_HALFWIDTH 100  // Hz, half of the ~200 Hz FT8 band
 
-/* Peak +/- random spread (Hz) applied to a CQ transmit frequency so repeated
-   CQs do not always sit on exactly the same spot. Kept a little inside the band
-   edge so the whole signal stays within dial +/- FT8_BAND_HALFWIDTH. */
+/* Peak +/- random spread (Hz) for a CQ transmit frequency, kept inside the
+   band so the whole signal stays within dial + 1500 +/- 100 Hz. */
 #define TX_CQ_RAND_SPREAD 80
 
-/* Return a CQ transmit frequency: the dial frequency plus a small random
-   offset, constrained to stay inside the FT8 band (dial +/- 100 Hz). This is a
-   true absolute RF frequency -- no receiver conversion offset is applied. */
+/* Return a CQ transmit frequency: dial + 1500 Hz (USB band centre) plus a small
+   random offset constrained to the FT8 band. This is a true absolute RF
+   frequency; ft8 transmits it verbatim. */
 static int32_t cqTxFrequency(void) {
     double r = (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * TX_CQ_RAND_SPREAD;
-    int32_t offset = (int32_t)r;
-    if (offset < -FT8_BAND_HALFWIDTH) offset = -FT8_BAND_HALFWIDTH;
-    if (offset > FT8_BAND_HALFWIDTH) offset = FT8_BAND_HALFWIDTH;
+    int32_t offset = FT8_USB_CENTER + (int32_t)r;
+    if (offset < FT8_USB_CENTER - FT8_BAND_HALFWIDTH) offset = FT8_USB_CENTER - FT8_BAND_HALFWIDTH;
+    if (offset > FT8_USB_CENTER + FT8_BAND_HALFWIDTH) offset = FT8_USB_CENTER + FT8_BAND_HALFWIDTH;
     return (int32_t)rx_options.dialfreq + offset;
 }
 

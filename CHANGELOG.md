@@ -2,21 +2,17 @@
 
 ### 0.8.5
 
-- **Fixed transmit frequency: out-of-band and wrong offset.** The FT8 signal
-  band is only ~200 Hz wide, centred on the dial (e.g. 20 m = 14.073.900 ..
-  14.074.100). The CQ transmit frequency was being computed as
-  `dial + 1500 +/- 1000` Hz, placing transmissions several kHz *outside* the
-  FT8 band. The 1500 Hz term was mistakenly borrowed from the receiver (see
-  below); it does not belong in a transmit frequency. CQ now transmits at
-  `dial +/- <=100 Hz` (a small in-band spread), and QSO replies transmit on the
-  peer's true frequency, so all transmissions stay inside the FT8 band.
-- **Fixed reported receive frequency ~3 kHz too high (sign error).** The
-  receiver tunes 1.5 kHz below the dial, so after downconversion the dial sits
-  at 1500 Hz in the audio passband (band centred at 1500 Hz, filtered
-  200..2600 Hz, to simplify the DSP). The decoded audio frequency must
-  therefore be mapped to RF as `dial + (audio - 1500)`, but the code added
-  +1500 instead of subtracting it, reporting every decode ~3 kHz high (in the
-  UI, ADIF log and PSKReporter). Corrected to `- 1500`.
+- **Corrected FT8 frequency convention (USB, dial + 1500 Hz).** FT8 is upper
+  sideband as used by WSJT-X: the band dial is the suppressed-carrier USB dial
+  and activity sits ~1500 Hz above it, so the true signal centre is dial + 1500
+  (e.g. 20 m = 14.075.500), within a ~200 Hz band. Both ends now use this one
+  convention: the receiver reports decoded signals as `dial + audio` (a
+  band-centre signal, audio ~1500, reads as dial + 1500), and CQ transmissions
+  are commanded at `dial + 1500 +/- <=100 Hz`. QSO replies transmit on the
+  peer's reported (absolute) frequency. Earlier code variously added or
+  subtracted 1500 inconsistently and applied a far-too-wide (+/-1000 Hz)
+  transmit spread that fell outside the FT8 band; frequencies shown in the UI,
+  logged to ADIF and sent to PSKReporter now match the true on-air frequency.
 - **Transmit frequency authority moved to the receiver.** Previously the `ft8`
   transmitter silently altered the requested frequency: it added a fixed
   `FT8_TXOFS` (1250 Hz) offset and, with `-o`, a random +/-1000 Hz, so the

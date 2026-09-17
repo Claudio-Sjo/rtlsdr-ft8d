@@ -286,7 +286,10 @@ static void fillRxTestBuffer(uint32_t idx) {
     const int nCalls = (int)(sizeof(calls) / sizeof(calls[0]));
 
     /* Audio frequencies spread across the passband, one slot per signal */
-    const float audioFreqs[] = {500.0f, 900.0f, 1300.0f, 1700.0f, 2100.0f};
+    /* Audio frequencies around the FT8 USB centre (~1500 Hz). Kept a bit spread
+       so several signals are separable, but realistic for the band. Reported RF
+       will be dial + these values (e.g. 20 m -> ~14.075.1 .. 14.075.9). */
+    const float audioFreqs[] = {1350.0f, 1425.0f, 1500.0f, 1575.0f, 1650.0f};
     const int nFreqs = (int)(sizeof(audioFreqs) / sizeof(audioFreqs[0]));
 
     static uint32_t rot = 0; /* rotates the station set between slots */
@@ -1402,11 +1405,13 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr ? strPtr : "");
 
-                /* Absolute RF = dial + (audio - 1500): the RX tunes 1.5 kHz low
-                   so the dial sits at 1500 Hz in the passband. This field is
-                   audio-relative to the dial (postSpots/printSpots add
-                   dec_options.freq), hence freq_hz - 1500. */
-                decodes[num_decoded].freq = (int32_t)freq_hz - 1500;
+                /* Reported RF = dial + audio. FT8 is USB and the receiver is
+                   arranged so the decoder's audio frequency equals the true
+                   USB audio offset from the dial (band centre ~1500 Hz), so a
+                   band-centre signal (audio ~1500) reports as dial + 1500.
+                   This field is audio-relative (postSpots/printSpots add the
+                   dial), so store just freq_hz. */
+                decodes[num_decoded].freq = (int32_t)freq_hz;
                 decodes[num_decoded].snr = estSnr;  // real SNR estimate (dB, 2500 Hz ref)
                 decodes[num_decoded].tempus = current_time;
 
@@ -1415,7 +1420,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 /* Feed the QSO Handler machine */
                 snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", decodes[num_decoded].call);
                 sprintf(qsoMsg.dest, "CQ");
-                qsoMsg.freq = (int32_t)freq_hz + dec_options.freq - 1500;  // absolute RF (dial at 1500 Hz audio)
+                qsoMsg.freq = (int32_t)freq_hz + dec_options.freq;  // absolute RF = dial + USB audio
                 qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
                 qsoMsg.snr = estSnr;        // real SNR estimate (dB)
                 qsoMsg.tempus = current_time;
@@ -1438,7 +1443,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                     snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", stripBrackets(dst, dstBuf, sizeof(dstBuf)));
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", msg ? msg : "");
 
-                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq - 1500;  // absolute RF (dial at 1500 Hz audio)
+                    qsoMsg.freq = (int32_t)freq_hz + dec_options.freq;  // absolute RF = dial + USB audio
                     qsoMsg.snr = estSnr;  // real SNR estimate (dB)
 
                     qsoMsg.ft8slot = thisSlot;  // This is useful only in QSO mode
@@ -1461,7 +1466,7 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
             snprintf(logMsg.dest, sizeof(logMsg.dest), "%s", stripBrackets(dst, ldstBuf, sizeof(ldstBuf)));
             snprintf(logMsg.message, sizeof(logMsg.message), "%s", logtxt ? logtxt : "");
 
-            logMsg.freq = (int32_t)freq_hz + dec_options.freq - 1500;  // absolute RF (dial at 1500 Hz audio)
+            logMsg.freq = (int32_t)freq_hz + dec_options.freq;  // absolute RF = dial + USB audio
             logMsg.snr = estSnr;  // real SNR estimate (dB)
             logMsg.tempus = current_time;
 
