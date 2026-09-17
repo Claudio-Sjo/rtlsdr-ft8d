@@ -50,13 +50,14 @@ OBJSFT8D = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/
 OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o stoargc.o mailbox.o
 OBJCLI = client.o
 OBJSK  = sk150lm_beacon.o
+OBJCAL = calibrate.o
 
 # On x86 (PC) only the receiver is built; on the Pi the transmitter and its
 # helpers are built as well.
 ifdef IS_X86
 TARGETS = rtlsdr_ft8d
 else
-TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon
+TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon calibrate
 endif
 
 .PHONY: all clean
@@ -89,8 +90,12 @@ sk150lm_beacon: $(OBJSK)
 	$(CXX) -o $@ $^ $(LIBS)
 
 
+calibrate: $(OBJCAL)
+	$(CXX) -o $@ $^ $(LIBS)
+
+
 clean:
-	rm -f *.o ft8_lib/ft8/*.o rtlsdr_ft8d ft8 client sk150lm_beacon fftw_wisdom.dat selftest.iq
+	rm -f *.o ft8_lib/ft8/*.o rtlsdr_ft8d ft8 client sk150lm_beacon calibrate fftw_wisdom.dat selftest.iq
 
 ifdef IS_X86
 install:
@@ -99,6 +104,7 @@ else
 install:
 	install rtlsdr_ft8d /usr/local/bin/rtlsdr_ft8d
 	install ft8 /usr/local/bin/ft8
+	install calibrate /usr/local/bin/calibrate
 	install ft8tx.service /etc/systemd/system/ft8tx.service
 	systemctl enable ft8tx.service
 endif

@@ -55,6 +55,8 @@
 
 #include <rtlsdr_ft8d.h>
 
+#include <txcal.h>
+
 #include <ft8/constants.h>
 #include <ft8/ldpc.h>
 #include <ft8/crc.h>
@@ -1032,12 +1034,15 @@ void print_usage() {
     std::cout << "  -h --help" << std::endl;
     std::cout << "    Print out this help screen." << std::endl;
     std::cout << "  -p --ppm ppm" << std::endl;
-    std::cout << "    Known PPM correction to 19.2MHz RPi nominal crystal frequency." << std::endl;
+    std::cout << "    Known PPM correction to 19.2MHz RPi nominal crystal frequency" << std::endl;
+    std::cout << "    (default: 0). Calibrate the RPi crystal once and pass it here for a" << std::endl;
+    std::cout << "    repeatable transmit frequency." << std::endl;
     std::cout << "  -s --self-calibration" << std::endl;
     std::cout << "    Check NTP before every transmission to obtain the PPM error of the" << std::endl;
-    std::cout << "    crystal (default setting!)." << std::endl;
+    std::cout << "    crystal. NOT recommended: NTP's software time correction is unrelated" << std::endl;
+    std::cout << "    to the PLLD RF error and varies run-to-run, shifting the TX frequency." << std::endl;
     std::cout << "  -f --free-running" << std::endl;
-    std::cout << "    Do not use NTP to correct frequency error of RPi crystal." << std::endl;
+    std::cout << "    Do not use NTP; use the fixed -p ppm value (default setting)." << std::endl;
     std::cout << "  -r --repeat" << std::endl;
     std::cout << "    Repeatedly, and in order, transmit on all the specified command line freqs." << std::endl;
     std::cout << "  -x --terminate <n>" << std::endl;
@@ -1081,7 +1086,25 @@ void parse_commandline(
     double specific_freq = FT8_TXOFS;
     // Default values
     ppm = 0;
-    self_cal = true;
+    /*
+     * self_cal defaults to OFF.
+     *
+     * The Pi's PLLD RF output derives from the BCM SoC crystal, a physically
+     * separate oscillator from both the receiver's own 1 ppm TCXO and the
+     * NTP-disciplined system clock. update_ppm() reads ntp_adjtime().freq --
+     * the kernel's *software timekeeping* correction -- which is not a
+     * measurement of the PLLD/crystal RF error and wanders run-to-run as the
+     * time daemon re-disciplines. Folding it into the divider
+     * (F_PLLD_CLK * (1 - ppm/1e6)) therefore shifted the transmit frequency by
+     * a different amount on every run despite a perfectly stable oscillator.
+     *
+     * With self_cal off, a fixed user-supplied ppm (0 by default, or -p VALUE)
+     * is used, so the divider computation is deterministic and the transmit
+     * frequency is repeatable. Calibrate the Pi's crystal ppm once against a
+     * reference (e.g. the TCXO-locked receiver) and pass it with -p.
+     * --self-cal is still available to opt back into the old NTP behaviour.
+     */
+    self_cal = false;
     repeat = false;
     random_offset = false;
     test_tone = NAN;
@@ -1419,6 +1442,27 @@ int mainFT8(const int argc, char *const argv[]) {
         mode,
         terminate);
     int nbands = center_freq_set.size();
+
+    /*
+     * Frequency correction precedence:
+     *   1. explicit -p ppm         (user override, ppm != 0)
+     *   2. stored calibration file (measured against the RTL-SDR TCXO by the
+     *      `calibrate` program)
+     *   3. 0 ppm, with a warning that the transmitter is uncalibrated
+     * NTP self-calibration (-s) still overrides all of the above when enabled.
+     */
+    if (!self_cal && ppm == 0.0) {
+        double calPpm;
+        if (txcal_read(&calPpm)) {
+            ppm = calPpm;
+            std::cout << "  Using stored TX calibration: " << ppm << " ppm" << std::endl;
+        } else {
+            std::cout << "  Warning: transmitter is uncalibrated (ppm=0). Run 'calibrate'"
+                      << std::endl
+                      << "  to align the TX frequency to the RTL-SDR TCXO, or pass -p."
+                      << std::endl;
+        }
+    }
 
     // Initial configuration
     struct PageInfo constPage;
