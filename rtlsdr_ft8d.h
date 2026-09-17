@@ -25,7 +25,7 @@
 
 /* Single source of truth for the project version, shared by the receiver
    (rtlsdr_ft8d) and the transmitter (ft8), which both include this header. */
-#define RTLSDR_FT8D_VERSION "0.8.4"
+#define RTLSDR_FT8D_VERSION "0.8.5"
 
 /* Sampling definition for RTL devices & FT8 protocol */
 #define SIGNAL_LENGHT 15

@@ -1083,7 +1083,14 @@ void parse_commandline(
     bool &no_delay,
     mode_type &mode,
     int &terminate) {
-    double specific_freq = FT8_TXOFS;
+    /*
+     * Additional frequency offset applied to a frequency given on the command
+     * line (-a). Defaults to 0: the receiver (rtlsdr_ft8d) now computes the
+     * exact absolute transmit frequency and passes it over the socket, so ft8
+     * transmits verbatim. (Previously this defaulted to FT8_TXOFS = 1250 Hz,
+     * silently shifting the socket-provided frequency.)
+     */
+    double specific_freq = 0;
     // Default values
     ppm = 0;
     /*
@@ -1554,7 +1561,14 @@ int mainFT8(const int argc, char *const argv[]) {
             double ft8_symtime = FT8_SYMTIME;
             double tone_spacing = 1.0 / ft8_symtime;
 
-            // Add random offset
+            /* NOTE: the random frequency offset now lives on the receiver side.
+             * rtlsdr_ft8d is the single authority on the actual transmit
+             * frequency: it computes the exact absolute frequency (including
+             * any randomization for CQ) and passes it over the socket, and ft8
+             * transmits it verbatim -- so the frequency the receiver shows,
+             * logs and reports is the true transmitted frequency. Socket
+             * requests never set random_offset; the -o flag therefore only
+             * affects standalone command-line transmissions. */
             if ((center_freq_desired != 0) && random_offset) {
                 center_freq_desired += (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * (FT8_RAND_OFFSET);
             }

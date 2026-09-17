@@ -1,5 +1,39 @@
 ## CHANGELOG
 
+### 0.8.5
+
+- **Transmit frequency authority moved to the receiver.** Previously the `ft8`
+  transmitter silently altered the requested frequency: it added a fixed
+  `FT8_TXOFS` (1250 Hz) offset and, with `-o`, a random +/-1000 Hz, so the
+  actual on-air frequency was decided inside `ft8` and was unknown to the
+  receiver -- the UI only showed the requested/centre value. Now `rtlsdr_ft8d`
+  computes the exact absolute transmit frequency and passes it over the socket,
+  and `ft8` transmits it verbatim (no added offset, no randomization for
+  socket-driven transmissions). QSO replies answer on the peer's frequency
+  (`currentQSO.freq`); CQ transmissions use dial + 1500 Hz +/- a random spread
+  chosen on the receiver side (fixing an earlier bug where replies used the
+  dial frequency without the 1500 Hz audio offset). The frequency shown in the
+  UI, written to ADIF and sent to PSKReporter is therefore the true
+  transmitted frequency. The frequency randomizer thus lives in the receiver.
+- **`calibrate` program: align the transmitter to the RTL-SDR TCXO.** New tool
+  that measures the Pi crystal's ppm error using the receiver as the frequency
+  reference: it commands `ft8` to emit an uncorrected CW test tone, receives it
+  through the (1 ppm TCXO) RTL-SDR, finds the carrier, and computes the ppm
+  error. Because the ft8 "test tone" is delta-sigma dithered (it alternates
+  between two divider frequencies with randomised timing so only its long-term
+  average equals the target), the measurement uses the power-weighted spectral
+  centroid over the carrier region -- not the single strongest FFT bin -- to
+  recover the true average frequency. The result is averaged over several
+  captures and written to a calibration file (`~/.config/rtlsdr-ft8d/txcal`).
+- **`ft8` reads the stored calibration.** Frequency-correction precedence is
+  now: explicit `-p ppm` > stored calibration file > 0 ppm (with a warning that
+  the transmitter is uncalibrated). This replaces NTP self-cal as the default
+  while `--self-cal` remains available. Self-cal was dropped as the default
+  because `ntp_adjtime()` reports the kernel's software timekeeping correction,
+  which is unrelated to the PLLD RF error and wandered run-to-run despite a
+  stable oscillator; the calibration file gives a fixed, measured, repeatable
+  correction tied to the receiver's TCXO instead.
+
 ### 0.8.4
 
 - **Unified version numbering.** The transmitter (`ft8`) previously carried its
@@ -28,36 +62,6 @@
 
 ### 0.8.3
 
-- **`calibrate` program: align the transmitter to the RTL-SDR TCXO.** New tool
-  that measures the Pi crystal's ppm error using the receiver as the frequency
-  reference: it commands `ft8` to emit an uncorrected CW test tone, receives it
-  through the (1 ppm TCXO) RTL-SDR, finds the carrier, and computes the ppm
-  error. Because the ft8 "test tone" is delta-sigma dithered (it alternates
-  between two divider frequencies with randomised timing so only its long-term
-  average equals the target), the measurement uses the power-weighted spectral
-  centroid over the carrier region -- not the single strongest FFT bin -- to
-  recover the true average frequency. The result is averaged over several
-  captures and written to a calibration file
-  (`~/.config/rtlsdr-ft8d/txcal`).
-- **`ft8` reads the stored calibration.** Frequency-correction precedence is
-  now: explicit `-p ppm` > stored calibration file > 0 ppm (with a warning that
-  the transmitter is uncalibrated). This replaces the earlier NTP self-cal as
-  the default while `--self-cal` remains available. Self-cal was removed as the
-  default because `ntp_adjtime()` reports the kernel's software timekeeping
-  correction, which is unrelated to the PLLD RF error and wandered run-to-run;
-  the calibration file gives a fixed, measured, repeatable correction tied to
-  the receiver's TCXO instead.
-- **Transmitter frequency now repeatable (`ft8`).** Self-calibration from NTP
-  is no longer the default. The Pi's PLLD RF output derives from the BCM SoC
-  crystal -- a separate oscillator from both the receiver's 1 ppm TCXO and the
-  NTP-disciplined system clock. The old code read `ntp_adjtime().freq` (the
-  kernel's software timekeeping correction, unrelated to the PLLD RF error and
-  wandering as the time daemon re-disciplines) and folded it into the clock
-  divider, so the transmit frequency shifted by a different amount on every run
-  despite a perfectly stable oscillator. `self_cal` now defaults off; a fixed
-  `-p/--ppm` value (0 by default) is used, giving a deterministic, repeatable
-  divider. Calibrate the RPi crystal once against a reference and pass it with
-  `-p`; `--self-cal` still opts back into the old NTP behaviour.
 - **Real SNR estimate.** The reported SNR was previously the Costas sync
   correlation score minus a constant (it clustered around 14-15 dB and was
   not a true SNR). It is now estimated in dB referenced to a 2500 Hz noise

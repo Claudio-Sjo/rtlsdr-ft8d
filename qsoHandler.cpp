@@ -74,6 +74,26 @@ extern std::vector<FT8Msg> tx_queue;
 #define MAXQSOLIFETIME 8  // in quarter of a minute
 #define QUERYCQDELAY 3    // in quarter of a minute
 
+/* Audio-passband centre offset added to the dial frequency for transmit
+   (standard FT8 convention). */
+#define TX_AUDIO_OFFSET 1500
+
+/* Peak +/- random spread (Hz) applied to a CQ transmit frequency so that
+   repeated CQs do not always land on the same audio slot. The randomizer used
+   to live in the ft8 transmitter; it now lives here so the receiver knows (and
+   can display/log/report) the exact transmitted frequency. */
+#define TX_CQ_RAND_SPREAD 1000
+
+/* Return a random CQ transmit frequency: dial + audio offset +/- spread,
+   kept inside a sane passband (200 .. 2800 Hz audio). */
+static int32_t cqTxFrequency(void) {
+    double r = (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * TX_CQ_RAND_SPREAD;
+    int32_t audio = TX_AUDIO_OFFSET + (int32_t)r;
+    if (audio < 200) audio = 200;
+    if (audio > 2800) audio = 2800;
+    return (int32_t)rx_options.dialfreq + audio;
+}
+
 /* Variables */
 static qsostate_t qsoState = idle;
 static qsostate_t qsoOldState = idle;
@@ -155,6 +175,7 @@ void logToAdi(struct plain_message *completedQSO) {
 }
 
 void initQsoState(void) {
+    srand((unsigned)time(NULL));  // seed the CQ frequency randomizer
     qsoState = idle;
     qsoOldState = idle;
     ft8time = 0;
@@ -256,7 +277,10 @@ bool handleTx(ft8slot_t txSlot) {
     snprintf(qsoMsg.src, sizeof(qsoMsg.src), "%s", dec_options.rcall);
     snprintf(qsoMsg.dest, sizeof(qsoMsg.dest), "%s", currentQSO.src);
 
-    qsoMsg.freq = dec_options.freq;
+    /* Answer on the peer's frequency (absolute Hz), which the decoder recorded
+       in currentQSO.freq. This is the exact frequency ft8 will transmit at. */
+    int32_t txFreq = currentQSO.freq;
+    qsoMsg.freq = txFreq;
 
     qsoMsg.ft8slot = txSlot;  // This is useful only in QSO mode
 
@@ -270,7 +294,7 @@ bool handleTx(ft8slot_t txSlot) {
             switch (qsoState) {
                 case replyLoc:
                     // Reply FT8Tx FREQ DEST SRC LOC
-                    sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, dec_options.rloc);
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", txFreq, currentQSO.src, dec_options.rcall, dec_options.rloc);
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", dec_options.rloc);
 
@@ -283,7 +307,7 @@ bool handleTx(ft8slot_t txSlot) {
                         sprintf(theLevel, "+%02d", currentQSO.snr);
                     else
                         sprintf(theLevel, "%03d", currentQSO.snr);
-                    sprintf(theMessage, "FT8Tx %d %s %s %s", dec_options.freq, currentQSO.src, dec_options.rcall, theLevel);
+                    sprintf(theMessage, "FT8Tx %d %s %s %s", txFreq, currentQSO.src, dec_options.rcall, theLevel);
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", theLevel);
 
@@ -292,7 +316,7 @@ bool handleTx(ft8slot_t txSlot) {
 
                     break;
                 case replyRR73:
-                    sprintf(theMessage, "FT8Tx %d %s %s RR73", dec_options.freq, currentQSO.src, dec_options.rcall);
+                    sprintf(theMessage, "FT8Tx %d %s %s RR73", txFreq, currentQSO.src, dec_options.rcall);
                     // Reply DEST SRC RR73
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "RR73");
@@ -303,7 +327,7 @@ bool handleTx(ft8slot_t txSlot) {
                     break;
                 case reply73:
                     // Reply DEST SRC 73
-                    sprintf(theMessage, "FT8Tx %d %s %s 73", dec_options.freq, currentQSO.src, dec_options.rcall);
+                    sprintf(theMessage, "FT8Tx %d %s %s 73", txFreq, currentQSO.src, dec_options.rcall);
                     qsoState = idle;
                     queueTx(theMessage);
                     snprintf(qsoMsg.message, sizeof(qsoMsg.message), "%s", "73");
@@ -341,11 +365,12 @@ void queryCQ(ft8slot_t theSlot) {
     static uint32_t queryRepeat = 0;
 
     if (ft8tick >= queryRepeat) {
-        sprintf(cqMessage, "FT8Tx %d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
+        int32_t cqFreq = cqTxFrequency();  // dial + audio offset +/- random spread
+        sprintf(cqMessage, "FT8Tx %d CQ %s %s", cqFreq, dec_options.rcall, dec_options.rloc);
         LOG(LOG_DEBUG, "queryCq Transmitting %s\n", cqMessage);
 
         queueTx(cqMessage);
-        sprintf(cqMessage, "%d CQ %s %s", rx_options.dialfreq + 1500, dec_options.rcall, dec_options.rloc);
+        sprintf(cqMessage, "%d CQ %s %s", cqFreq, dec_options.rcall, dec_options.rloc);
         displayTxString(cqMessage);
         queryRepeat = ft8tick + QUERYCQDELAY;
     }
