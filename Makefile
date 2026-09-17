@@ -46,6 +46,12 @@ endif
 #   gcc is a bit faster that clang on this app
 #   for dbg: -Wall -fsanitize=address
 
+# Project headers. Objects depend on these so that editing a header -- e.g.
+# bumping RTLSDR_FT8D_VERSION in rtlsdr_ft8d.h -- forces the affected objects to
+# rebuild (a plain pattern rule has no header prerequisites, which previously
+# left the version string stale until a manual 'make clean').
+HEADERS = rtlsdr_ft8d.h qsoHandler.h ft8_ncurses.h pskreporter.hpp tsqueue.h txcal.h
+
 OBJSFT8D = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o
 OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o stoargc.o mailbox.o
 OBJCLI = client.o
@@ -67,13 +73,13 @@ all: $(TARGETS)
 #%.o: %.c
 #	${CXX} ${CXXFLAGS} $(PI_VERSION) -c $< -o $@
 
-%.o: %.c
+%.o: %.c $(HEADERS)
 	${CC} ${CFLAGS} $(PI_VERSION) -c $< -o $@
 
 ft8_lib/%.o: ft8_lib/%.c
 	${CC} ${CFLAGS} $(PI_VERSION) -Wno-format -c $< -o $@
 
-%.o: %.cpp
+%.o: %.cpp $(HEADERS)
 	${CXX} ${CXXFLAGS} $(PI_VERSION) -c $< -o $@
 
 rtlsdr_ft8d: $(OBJSFT8D)

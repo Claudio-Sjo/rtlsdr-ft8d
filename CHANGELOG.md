@@ -2,6 +2,21 @@
 
 ### 0.8.5
 
+- **Fixed transmit frequency: out-of-band and wrong offset.** The FT8 signal
+  band is only ~200 Hz wide, centred on the dial (e.g. 20 m = 14.073.900 ..
+  14.074.100). The CQ transmit frequency was being computed as
+  `dial + 1500 +/- 1000` Hz, placing transmissions several kHz *outside* the
+  FT8 band. The 1500 Hz term was mistakenly borrowed from the receiver (see
+  below); it does not belong in a transmit frequency. CQ now transmits at
+  `dial +/- <=100 Hz` (a small in-band spread), and QSO replies transmit on the
+  peer's true frequency, so all transmissions stay inside the FT8 band.
+- **Fixed reported receive frequency ~3 kHz too high (sign error).** The
+  receiver tunes 1.5 kHz below the dial, so after downconversion the dial sits
+  at 1500 Hz in the audio passband (band centred at 1500 Hz, filtered
+  200..2600 Hz, to simplify the DSP). The decoded audio frequency must
+  therefore be mapped to RF as `dial + (audio - 1500)`, but the code added
+  +1500 instead of subtracting it, reporting every decode ~3 kHz high (in the
+  UI, ADIF log and PSKReporter). Corrected to `- 1500`.
 - **Transmit frequency authority moved to the receiver.** Previously the `ft8`
   transmitter silently altered the requested frequency: it added a fixed
   `FT8_TXOFS` (1250 Hz) offset and, with `-o`, a random +/-1000 Hz, so the

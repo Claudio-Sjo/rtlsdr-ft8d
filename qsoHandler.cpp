@@ -74,24 +74,35 @@ extern std::vector<FT8Msg> tx_queue;
 #define MAXQSOLIFETIME 8  // in quarter of a minute
 #define QUERYCQDELAY 3    // in quarter of a minute
 
-/* Audio-passband centre offset added to the dial frequency for transmit
-   (standard FT8 convention). */
-#define TX_AUDIO_OFFSET 1500
+/*
+ * FT8 transmit band.
+ *
+ * The FT8 signal occupies a band only ~200 Hz wide, centred on the dial
+ * frequency: permitted RF is dial +/- FT8_BAND_HALFWIDTH (e.g. for the 20 m
+ * dial 14.074.000 the signal must lie between 14.073.900 and 14.074.100).
+ *
+ * IMPORTANT: the dial is the CENTRE of the band, not a lower edge, and the
+ * transmit frequency must NOT include the receiver's 1500 Hz conversion offset
+ * (that offset belongs only to the RX tuning/demodulation chain, where the
+ * front end is tuned ~1.5 kHz low so the signal lands above zero after the
+ * final conversion -- it has nothing to do with where we transmit).
+ */
+#define FT8_BAND_HALFWIDTH 100  // Hz, half of the ~200 Hz FT8 band
 
-/* Peak +/- random spread (Hz) applied to a CQ transmit frequency so that
-   repeated CQs do not always land on the same audio slot. The randomizer used
-   to live in the ft8 transmitter; it now lives here so the receiver knows (and
-   can display/log/report) the exact transmitted frequency. */
-#define TX_CQ_RAND_SPREAD 1000
+/* Peak +/- random spread (Hz) applied to a CQ transmit frequency so repeated
+   CQs do not always sit on exactly the same spot. Kept a little inside the band
+   edge so the whole signal stays within dial +/- FT8_BAND_HALFWIDTH. */
+#define TX_CQ_RAND_SPREAD 80
 
-/* Return a random CQ transmit frequency: dial + audio offset +/- spread,
-   kept inside a sane passband (200 .. 2800 Hz audio). */
+/* Return a CQ transmit frequency: the dial frequency plus a small random
+   offset, constrained to stay inside the FT8 band (dial +/- 100 Hz). This is a
+   true absolute RF frequency -- no receiver conversion offset is applied. */
 static int32_t cqTxFrequency(void) {
     double r = (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * TX_CQ_RAND_SPREAD;
-    int32_t audio = TX_AUDIO_OFFSET + (int32_t)r;
-    if (audio < 200) audio = 200;
-    if (audio > 2800) audio = 2800;
-    return (int32_t)rx_options.dialfreq + audio;
+    int32_t offset = (int32_t)r;
+    if (offset < -FT8_BAND_HALFWIDTH) offset = -FT8_BAND_HALFWIDTH;
+    if (offset > FT8_BAND_HALFWIDTH) offset = FT8_BAND_HALFWIDTH;
+    return (int32_t)rx_options.dialfreq + offset;
 }
 
 /* Variables */
