@@ -2,17 +2,17 @@
 
 ### 0.8.5
 
-- **Corrected FT8 frequency convention (USB, dial + 1500 Hz).** FT8 is upper
-  sideband as used by WSJT-X: the band dial is the suppressed-carrier USB dial
-  and activity sits ~1500 Hz above it, so the true signal centre is dial + 1500
-  (e.g. 20 m = 14.075.500), within a ~200 Hz band. Both ends now use this one
-  convention: the receiver reports decoded signals as `dial + audio` (a
-  band-centre signal, audio ~1500, reads as dial + 1500), and CQ transmissions
-  are commanded at `dial + 1500 +/- <=100 Hz`. QSO replies transmit on the
-  peer's reported (absolute) frequency. Earlier code variously added or
-  subtracted 1500 inconsistently and applied a far-too-wide (+/-1000 Hz)
-  transmit spread that fell outside the FT8 band; frequencies shown in the UI,
-  logged to ADIF and sent to PSKReporter now match the true on-air frequency.
+- **Corrected FT8 frequency convention (USB, `RF = dial + audio`).** Per
+  ft8spec.md, FT8 is upper sideband: the published band frequency is the USB
+  dial and an individual signal may sit anywhere in WSJT-X's ~0..3000 Hz audio
+  passband (`f_RF = f_dial + f_audio`; e.g. 20 m dial 14.074.000 + 1500 Hz audio
+  = 14.075.500). Both ends now use this single convention: the receiver reports
+  decoded signals as `dial + audio`, and CQ transmissions pick a random audio
+  slot within the usable passband (300..2700 Hz), like a normal WSJT-X station.
+  QSO replies transmit on the peer's reported (absolute) frequency. Earlier code
+  variously added or subtracted a fixed 1500 Hz and, at one point, confined
+  transmit to a too-narrow band; frequencies shown in the UI, logged to ADIF and
+  sent to PSKReporter now match the true on-air frequency.
 - **Transmit frequency authority moved to the receiver.** Previously the `ft8`
   transmitter silently altered the requested frequency: it added a fixed
   `FT8_TXOFS` (1250 Hz) offset and, with `-o`, a random +/-1000 Hz, so the
