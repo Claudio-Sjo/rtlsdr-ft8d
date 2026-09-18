@@ -13,7 +13,7 @@ This project aim at decoding [FT8](https://en.wikipedia.org/wiki/WSJT_(amateur_r
 Note that it requires proper License and HW for fulfilling the relevant rules.
 To install and use your dongle on a Raspberry Pi with a Raspberry Pi OS, follow these steps but
 first be sure that the proper firmware is up to date, if not run
-# sudo rp-update
+# sudo rpi-update
 
 ```bash
 echo "== Install dependencies"
@@ -52,8 +52,6 @@ cd ..
 echo "== Install rtlsdr-ft8d"
 git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
 cd rtlsdr-ft8d
-git clone https://github.com/kgoba/ft8_lib
-git submodule update --init --recursive
 make
 sudo make install
 
@@ -122,7 +120,6 @@ The service creation is described here: https://linuxhandbook.com/create-systemd
      ```bash
      git clone https://github.com/Claudio-Sjo/rtlsdr-ft8d
      cd rtlsdr-ft8d
-     git clone https://github.com/kgoba/ft8_lib
      ```
 
   6. Build the application:

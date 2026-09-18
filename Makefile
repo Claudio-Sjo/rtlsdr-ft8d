@@ -1,7 +1,7 @@
 CC = clang
 CXX = clang++
-CFLAGS= -O3 -std=gnu17 -g -I./ft8_lib -I.
-CXXFLAGS= -O3 -x c++ -g -I./ft8_lib -I.
+CFLAGS= -O3 -std=gnu17 -g -I./libft8 -I.
+CXXFLAGS= -O3 -x c++ -g -I./libft8 -I.
 LIBS = -lusb-1.0 -lrtlsdr -lpthread -lfftw3f -lcurl -lm -lstdc++ -lncurses
 
 #ifeq ($(findstring armv6,$(shell uname -m)),armv6)
@@ -52,8 +52,8 @@ endif
 # left the version string stale until a manual 'make clean').
 HEADERS = rtlsdr_ft8d.h qsoHandler.h ft8_ncurses.h pskreporter.hpp tsqueue.h txcal.h
 
-OBJSFT8D = rtlsdr_ft8d.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o
-OBJSFTX = ft8.o ft8_lib/ft8/constants.o ft8_lib/ft8/text.o ft8_lib/ft8/ldpc.o ft8_lib/ft8/crc.o ft8_lib/ft8/message.o ft8_lib/ft8/encode.o ft8_lib/ft8/decode.o ft8_lib/common/monitor.o ft8_lib/fft/kiss_fft.o ft8_lib/fft/kiss_fftr.o stoargc.o mailbox.o
+OBJSFT8D = rtlsdr_ft8d.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/ldpc.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/decode.o libft8/common/monitor.o libft8/fft/kiss_fft.o libft8/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o
+OBJSFTX = ft8.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/ldpc.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/decode.o libft8/common/monitor.o libft8/fft/kiss_fft.o libft8/fft/kiss_fftr.o stoargc.o mailbox.o
 OBJCLI = client.o
 OBJSK  = sk150lm_beacon.o
 OBJCAL = calibrate.o
@@ -76,7 +76,7 @@ all: $(TARGETS)
 %.o: %.c $(HEADERS)
 	${CC} ${CFLAGS} $(PI_VERSION) -c $< -o $@
 
-ft8_lib/%.o: ft8_lib/%.c
+libft8/%.o: libft8/%.c
 	${CC} ${CFLAGS} $(PI_VERSION) -Wno-format -c $< -o $@
 
 %.o: %.cpp $(HEADERS)
@@ -101,7 +101,7 @@ calibrate: $(OBJCAL)
 
 
 clean:
-	rm -f *.o ft8_lib/ft8/*.o rtlsdr_ft8d ft8 client sk150lm_beacon calibrate fftw_wisdom.dat selftest.iq
+	rm -f *.o libft8/ft8/*.o libft8/common/*.o libft8/fft/*.o rtlsdr_ft8d ft8 client sk150lm_beacon calibrate fftw_wisdom.dat selftest.iq
 
 ifdef IS_X86
 install:
