@@ -137,10 +137,6 @@ int init_ncurses(uint32_t initialFreq) {
     noecho();
 
     /* We need the time of the day */
-    time_t currentTime = time(NULL);
-    struct tm tmv;
-    struct tm tm = *localtime_r(&currentTime, &tmv);
-
     /* Colors first (needed before we style the windows) */
     start_color();
     init_pair(1, COLOR_YELLOW, COLOR_BLACK);
@@ -767,7 +763,6 @@ void printCall(bool refresh) {
 /* CQ Handler Thread */
 void *CQHandler(void *vargp) {
     static bool termRefresh = true;
-    int dynamicRefresh = 0;
     uint32_t clockRefresh = 60;
 
     while (exitCQThread == false) {

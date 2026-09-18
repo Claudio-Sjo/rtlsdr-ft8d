@@ -734,15 +734,8 @@ ft8slot_t getActiveSlot(void) {
 
 /* QSO Handler Thread */
 void *QSOHandler(void *vargp) {
-    static bool termRefresh = true;
-    int dynamicRefresh = 0;
-    uint32_t clockRefresh = 60;
-
     while (qsoExit.load() == false) {
-        char key;
-        struct decoder_results dr;
         struct plain_message qsoMsg;
-        struct plain_message logMsg;
         struct tick_message tickMsg;
 
         /* Wait for the trigger event, this brings the current slot */

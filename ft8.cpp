@@ -233,15 +233,15 @@ typedef enum {
 
 // Structure used to control clock generator
 struct GPCTL {
-    char SRC : 4;
-    char ENAB : 1;
-    char KILL : 1;
-    char : 1;
-    char BUSY : 1;
-    char FLIP : 1;
-    char MASH : 2;
+    unsigned char SRC : 4;
+    unsigned char ENAB : 1;
+    unsigned char KILL : 1;
+    unsigned char : 1;
+    unsigned char BUSY : 1;
+    unsigned char FLIP : 1;
+    unsigned char MASH : 2;
     unsigned int : 13;
-    char PASSWD : 8;
+    unsigned char PASSWD : 8;
 };
 
 // Structure used to tell the DMA engine what to do
@@ -413,8 +413,6 @@ int main(const int argc, char *const argv[]) {
     socklen_t addrlen = sizeof(address);
     FT8Msg Txletter, Rxletter;
     int socket_status;
-    int argnumber;
-    char **argvalue;
 
     fd_set readfds; /* Flag for select()     */
 

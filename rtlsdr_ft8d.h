@@ -25,7 +25,7 @@
 
 /* Single source of truth for the project version, shared by the receiver
    (rtlsdr_ft8d) and the transmitter (ft8), which both include this header. */
-#define RTLSDR_FT8D_VERSION "0.8.5"
+#define RTLSDR_FT8D_VERSION "0.8.6"
 
 /* Sampling definition for RTL devices & FT8 protocol */
 #define SIGNAL_LENGHT 15
@@ -188,10 +188,6 @@ struct tick_message {
     ft8slot_t currentSlot;
 };
 
-static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void *ctx);
-static void *rtlsdr_rx(void *arg);
-static void sigint_callback_handler(int signum);
-static void *decoder(void *arg);
 void postSpots(uint32_t n_results);
 void printSpots();
 void saveSample(float *iSamples, float *qSamples);

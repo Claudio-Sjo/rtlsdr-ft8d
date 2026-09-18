@@ -193,7 +193,7 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
              * Understanding cascaded integrator-comb filters
                http://www.embedded.com/design/configurable-systems/4006446/Understanding-cascaded-integrator-comb-filters
     */
-    for (int32_t i = 0; i < samples_count / 2; i++) {  // UPDATE: i+=2 & fix below
+    for (int32_t i = 0; i < (int32_t)(samples_count / 2); i++) {  // UPDATE: i+=2 & fix below
         /* Integrator stages (N=2) */
         Ix1 += (int32_t)sigIn[i * 2];  // EVAL: option to move sigIn in float here
         Qx1 += (int32_t)sigIn[i * 2 + 1];
@@ -457,7 +457,7 @@ void initFFTW() {
      * https://en.wikipedia.org/wiki/Hann_function
      */
     hann = (float *)malloc(sizeof(float) * NFFT);
-    for (int i = 0; i < NFFT; i++) {
+    for (uint32_t i = 0; i < NFFT; i++) {
         hann[i] = sinf((M_PI / NFFT) * i);
     }
 }
@@ -547,9 +547,6 @@ void postSpots(uint32_t n_results) {
         LOG(LOG_DEBUG, "Decoder thread -- Skipping the reporting\n");
         return;
     }
-
-    /* Fixed strings for Mode */
-    const char txMode[] = "FT8";
 
     for (uint32_t i = 0; i < n_results; i++) {
         struct decoder_results dr;
@@ -1344,7 +1341,10 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
             char text[FTX_MAX_MESSAGE_LENGTH + 1];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
-
+            if (unpack_status != FTX_MESSAGE_RC_OK) {
+                LOG(LOG_DEBUG, "Decoded : unpack failed (rc=%d), skipping\n", (int)unpack_status);
+                continue;
+            }
             snprintf(msgToLog, FTX_MAX_MESSAGE_LENGTH, "%s", text);
 
             // wprintw(trafficW, "Message to print: %s\n", msgToPrint);
@@ -1645,7 +1645,7 @@ void usage(FILE *stream, int32_t status) {
 }
 
 int main(int argc, char **argv) {
-    uint32_t opt;
+    int opt;
     const char *short_options = "f:c:l:g:ao:p:u:d:n:i:xtw:r:";
     int32_t option_index = 0;
     struct option long_options[] = {
@@ -1656,10 +1656,6 @@ int main(int argc, char **argv) {
         {"rx-test", no_argument, 0, 0},
         {0, 0, 0, 0}};
 
-    int32_t rtl_result;
-    int32_t rtl_count;
-    char rtl_vendor[256], rtl_product[256], rtl_serial[256];
-
     initrx_options();
 
     /* FFTW init & allocation */
@@ -1667,7 +1663,6 @@ int main(int argc, char **argv) {
 
     /* Stop condition setup */
     rx_state.exit_flag = false;
-    uint32_t nLoop = 0;
 
     if (argc <= 1)
         usage(stdout, EXIT_SUCCESS);
@@ -2167,27 +2162,27 @@ void ft8_subsystem(float *iSamples,
     int offset = 0;
     float max_mag = -120.0f;
 
-    for (int idx_block = 0; idx_block < NUM_BLOCKS; ++idx_block) {
+    for (uint32_t idx_block = 0; idx_block < NUM_BLOCKS; ++idx_block) {
         // Loop over two possible time offsets (0 and BLOCK_SIZE/2)
-        for (int time_sub = 0; time_sub < K_TIME_OSR; ++time_sub) {
+        for (uint32_t time_sub = 0; time_sub < K_TIME_OSR; ++time_sub) {
             float mag_db[NFFT];
 
             // UPDATE : try FFT over 2 symbols, stepped by half symbols
-            for (int i = 0; i < NFFT; ++i) {
+            for (uint32_t i = 0; i < NFFT; ++i) {
                 fft_in[i][0] = iSamples[(idx_block * BLOCK_SIZE) + (time_sub * SUB_BLOCK_SIZE) + i] * hann[i];
                 fft_in[i][1] = qSamples[(idx_block * BLOCK_SIZE) + (time_sub * SUB_BLOCK_SIZE) + i] * hann[i];
             }
             fftwf_execute(fft_plan);
 
             // Compute log magnitude in decibels
-            for (int i = 0; i < NFFT; ++i) {
+            for (uint32_t i = 0; i < NFFT; ++i) {
                 float mag2 = fft_out[i][0] * fft_out[i][0] + fft_out[i][1] * fft_out[i][1];
                 mag_db[i] = 10.0f * log10f(1E-12f + mag2 * 4.0f / (NFFT * NFFT));
             }
 
             // Loop over two possible frequency bin offsets (for averaging)
-            for (int freq_sub = 0; freq_sub < K_FREQ_OSR; ++freq_sub) {
-                for (int pos = 0; pos < NUM_BIN; ++pos) {
+            for (uint32_t freq_sub = 0; freq_sub < K_FREQ_OSR; ++freq_sub) {
+                for (uint32_t pos = 0; pos < NUM_BIN; ++pos) {
                     float db = mag_db[pos * K_FREQ_OSR + freq_sub];
                     // Scale decibels to unsigned 8-bit range and clamp the value
                     // Range 0-240 covers -120..0 dB in 0.5 dB steps
@@ -2238,7 +2233,6 @@ wrefresh(trafficW);
 
     mon.min_bin = (int)(mon_cfg.f_min * symbol_period);
     mon.max_bin = (int)(mon_cfg.f_max * symbol_period) + 1;
-    const int num_bins = mon.max_bin - mon.min_bin;
 
     // waterfall_init(&me->wf, max_blocks, num_bins, mon_cfg.time_osr, mon_cfg.freq_osr);
     mon.wf.protocol = mon_cfg.protocol;

@@ -1,5 +1,28 @@
 ## CHANGELOG
 
+### 0.8.6
+
+- **Vendored ft8_lib as an in-tree `libft8/`.** The decoder library is now a
+  frozen copy of the files the project actually uses (under `libft8/`), instead
+  of a git submodule. This removes the submodule checkout step and the
+  dependency on the dead `git://` submodule URL, and makes the build
+  self-contained and reproducible. `libft8/README.md` records the upstream
+  source (kgoba/ft8_lib, commit 50ee0c0 / v2.0, MIT) and rationale; the MIT
+  LICENSE is preserved. The Makefile now builds from `libft8/`.
+- **README fixes.** Removed the obsolete `git clone .../ft8_lib` and
+  `git submodule update --init --recursive` steps (no longer needed with the
+  vendored library), and corrected `sudo rp-update` to `sudo rpi-update`.
+- **Warning-free build.** All project sources now compile cleanly under
+  `-Wall -Wextra` (receiver, transmitter and calibrate, on both x86 and ARM):
+  removed dead/unused locals, moved the `static` handler prototypes out of the
+  shared header, fixed sign-compare mismatches (including `opt` which should be
+  a signed `int` for the getopt `-1` sentinel), made the `GPCTL` clock-control
+  bit-fields unsigned, and made `decode()` check `ftx_message_decode()`'s
+  return and skip messages that fail to unpack.
+- **Makefile: rebuild on header change.** Object files now depend on the
+  project headers, so a version bump in `rtlsdr_ft8d.h` (or any header edit)
+  triggers the necessary recompilation without a manual `make clean`.
+
 ### 0.8.5
 
 - **Corrected FT8 frequency convention (USB, `RF = dial + audio`).** Per
