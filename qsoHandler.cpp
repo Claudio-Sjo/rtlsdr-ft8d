@@ -75,34 +75,29 @@ extern std::vector<FT8Msg> tx_queue;
 #define QUERYCQDELAY 3    // in quarter of a minute
 
 /*
- * FT8 transmit band (USB convention, as used by WSJT-X).
+ * FT8 transmit frequency (USB convention, per ft8spec.md).
  *
- * FT8 is upper-sideband: the band "dial" frequency is the suppressed-carrier
- * USB dial, and the activity sits ~1500 Hz above it in audio. The transmit
- * CENTRE is therefore dial + FT8_USB_CENTER (e.g. 20 m: 14.074.000 + 1500 =
- * 14.075.500). The usable FT8 band is only ~200 Hz wide, i.e.
- * dial + 1500 +/- FT8_BAND_HALFWIDTH.
+ * FT8 is upper sideband: f_RF = f_dial + f_audio. The published band frequency
+ * (e.g. 20 m = 14.074.000) is the USB dial; an individual FT8 signal is only
+ * ~50 Hz wide and may be placed anywhere within WSJT-X's ~0..3000 Hz audio
+ * passband. Many stations coexist across that ~3 kHz by choosing different
+ * audio frequencies; 1500 Hz is only a common example, not a required centre.
  *
- * The receiver reports decoded signals as dial + audio, where a band-centre
- * signal has audio ~1500, so a received signal and our transmit frequency use
- * the same absolute-RF convention.
+ * For a CQ we therefore pick a random audio frequency within a safe portion of
+ * the passband (kept a little inside the edges to avoid filter roll-off and
+ * stay clear of DC), like a normal WSJT-X station selecting a clear slot. The
+ * resulting absolute RF (dial + audio) is what ft8 transmits verbatim and what
+ * the receiver reports, so both ends agree.
  */
-#define FT8_USB_CENTER 1500     // Hz, USB audio centre of the FT8 activity
-#define FT8_BAND_HALFWIDTH 100  // Hz, half of the ~200 Hz FT8 band
+#define TX_AUDIO_MIN 300   // Hz, low edge of the usable audio passband for TX
+#define TX_AUDIO_MAX 2700  // Hz, high edge of the usable audio passband for TX
 
-/* Peak +/- random spread (Hz) for a CQ transmit frequency, kept inside the
-   band so the whole signal stays within dial + 1500 +/- 100 Hz. */
-#define TX_CQ_RAND_SPREAD 80
-
-/* Return a CQ transmit frequency: dial + 1500 Hz (USB band centre) plus a small
-   random offset constrained to the FT8 band. This is a true absolute RF
-   frequency; ft8 transmits it verbatim. */
+/* Return a CQ transmit frequency: dial + a random audio offset within
+   [TX_AUDIO_MIN, TX_AUDIO_MAX]. This is a true absolute RF frequency. */
 static int32_t cqTxFrequency(void) {
-    double r = (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * TX_CQ_RAND_SPREAD;
-    int32_t offset = FT8_USB_CENTER + (int32_t)r;
-    if (offset < FT8_USB_CENTER - FT8_BAND_HALFWIDTH) offset = FT8_USB_CENTER - FT8_BAND_HALFWIDTH;
-    if (offset > FT8_USB_CENTER + FT8_BAND_HALFWIDTH) offset = FT8_USB_CENTER + FT8_BAND_HALFWIDTH;
-    return (int32_t)rx_options.dialfreq + offset;
+    double frac = rand() / ((double)RAND_MAX + 1.0);  // [0,1)
+    int32_t audio = TX_AUDIO_MIN + (int32_t)(frac * (TX_AUDIO_MAX - TX_AUDIO_MIN));
+    return (int32_t)rx_options.dialfreq + audio;
 }
 
 /* Variables */

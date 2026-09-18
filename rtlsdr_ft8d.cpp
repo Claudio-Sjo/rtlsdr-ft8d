@@ -286,10 +286,9 @@ static void fillRxTestBuffer(uint32_t idx) {
     const int nCalls = (int)(sizeof(calls) / sizeof(calls[0]));
 
     /* Audio frequencies spread across the passband, one slot per signal */
-    /* Audio frequencies around the FT8 USB centre (~1500 Hz). Kept a bit spread
-       so several signals are separable, but realistic for the band. Reported RF
-       will be dial + these values (e.g. 20 m -> ~14.075.1 .. 14.075.9). */
-    const float audioFreqs[] = {1350.0f, 1425.0f, 1500.0f, 1575.0f, 1650.0f};
+    /* Audio frequencies spread across the usable passband (like several real
+       WSJT-X stations at different audio slots). Reported RF = dial + audio. */
+    const float audioFreqs[] = {500.0f, 1000.0f, 1500.0f, 2000.0f, 2500.0f};
     const int nFreqs = (int)(sizeof(audioFreqs) / sizeof(audioFreqs[0]));
 
     static uint32_t rot = 0; /* rotates the station set between slots */
