@@ -94,12 +94,13 @@ extern std::vector<FT8Msg> tx_queue;
  * f_max = 1500 Hz, so the TX audio window below is kept inside 200..1500 Hz so
  * that what we transmit is also what this same receiver can decode.
  */
-#define TX_AUDIO_MIN 300   // Hz, low edge of the usable audio passband for TX
-#define TX_AUDIO_MAX 1400  // Hz, high edge of the usable audio passband for TX
-                           // Kept inside the RX passband (f_min=200, f_max=1500)
-                           // so our own transmissions land where this same
-                           // transceiver can receive them, with margin below
-                           // the decimation-filter roll-off edge (~1472 Hz).
+#define TX_AUDIO_MIN (RX_AUDIO_MIN + 100)  // Hz, low edge of the TX audio window
+#define TX_AUDIO_MAX (RX_AUDIO_MAX - 100)  // Hz, high edge of the TX audio window
+                           // Derived from the RX passband (RX_AUDIO_MIN/MAX in
+                           // rtlsdr_ft8d.h) with a 100 Hz margin inside each
+                           // edge, so our own transmissions land where this
+                           // same transceiver can receive them, clear of the
+                           // decimation-filter roll-off and DC.
 
 /* Return a CQ transmit frequency: dial + a random audio offset within
    [TX_AUDIO_MIN, TX_AUDIO_MAX]. This is a true absolute RF frequency. */

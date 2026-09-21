@@ -2245,13 +2245,14 @@ wrefresh(trafficW);
 
     monitor_t mon;
     monitor_config_t mon_cfg = {
-        .f_min = 200,
-        /* f_max capped at 1500 Hz: the decimation chain (CIC R=750,N=2 +
-           compensation FIR designed with F0=0.92 -> ~1472 Hz edge) rolls off
-           below the 1600 Hz waterfall ceiling (NUM_BIN=256 * 6.25 Hz). A value
-           above 1600 also produces max_bin > NUM_BIN, an out-of-range index.
-           Empirically signals decode through 1500 Hz and fail at 1800 Hz. */
-        .f_max = 1500,
+        .f_min = RX_AUDIO_MIN,
+        /* f_max capped by the decimation chain (CIC R=750,N=2 + compensation
+           FIR designed with F0=0.92 -> ~1472 Hz edge) below the 1600 Hz
+           waterfall ceiling (NUM_BIN=256 * 6.25 Hz). A value above 1600 also
+           produces max_bin > NUM_BIN, an out-of-range index. Empirically
+           signals decode through 1500 Hz and fail at 1800 Hz. See
+           wideband_plan.md for widening beyond this. */
+        .f_max = RX_AUDIO_MAX,
         .sample_rate = SIGNAL_SAMPLE_RATE,
         .time_osr = K_TIME_OSR,
         .freq_osr = K_FREQ_OSR,

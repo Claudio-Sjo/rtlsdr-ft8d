@@ -211,6 +211,13 @@ int init_ncurses(uint32_t initialFreq) {
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
     mvwprintw(header, 0, 1, "%s - %s  %dHz", dec_options.rcall, dec_options.rloc, qsoFreq);
     mvwprintw(header, 0, COLS / 2 - 12, "rtlsdr FT8 %s - QSO Mode", rtlsdr_ft8d_version);
+    /* Right-aligned: usable RX audio passband width (kHz) */
+    {
+        char bwStr[24];
+        snprintf(bwStr, sizeof(bwStr), "BW %d-%d Hz",
+                 (int)RX_AUDIO_MIN, (int)RX_AUDIO_MAX);
+        mvwprintw(header, 0, COLS - (int)strlen(bwStr) - 1, "%s", bwStr);
+    }
 
     /* Content windows: normal attr + scrolling */
     wattrset(trafficW, A_NORMAL);

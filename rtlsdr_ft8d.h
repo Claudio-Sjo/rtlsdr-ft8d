@@ -36,6 +36,13 @@
 #define DEFAULT_BUF_LENGTH (4 * 16384)
 #define FIR_TAPS 56
 
+/* Usable receiver audio passband (single source of truth, shared by the
+   monitor config, the TX audio-slot limits and the UI bandwidth display).
+   Bounded above by the decimation-filter roll-off and the waterfall bin
+   ceiling (NUM_BIN * K_FSK_DEV). See wideband_plan.md for widening this. */
+#define RX_AUDIO_MIN 200   // Hz, low edge of the usable passband
+#define RX_AUDIO_MAX 1500  // Hz, high edge of the usable passband
+
 #define K_MIN_SCORE 10
 #define K_MAX_CANDIDATES 120
 #define K_LDPC_ITERS 20

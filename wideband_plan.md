@@ -1,0 +1,216 @@
+# Plan: Selectable Receiver Bandwidth (up to WSJT-X ~3000 Hz)
+
+## Goal
+
+Add the ability to widen the receiver's usable audio passband from the current
+200-1500 Hz up to WSJT-X's full ~3000 Hz, so this receiver can decode FT8
+signals placed anywhere in the standard 0-3000 Hz USB audio window (not just the
+lower ~1300 Hz).
+
+Current state (v0.8.7): `mon_cfg.f_max` is capped at 1500 Hz because the whole
+DSP chain produces a 3200 sps complex baseband stream (Nyquist 1600 Hz) and the
+FT8 waterfall has `NUM_BIN = 256` bins x 6.25 Hz = 1600 Hz ceiling. The RTL is
+tuned to `realfreq + FS4_RATE` (dial at audio 0, USB convention
+`f_RF = f_dial + f_audio`).
+
+---
+
+## Key finding: the FT8 decoder scales cleanly
+
+The ft8_lib decoder (`libft8/`) needs **no changes**. It derives all of its
+geometry from `sample_rate x symbol_period`, and the FT8 symbol period (0.16 s)
+is fixed by the protocol. The base FFT bin is always
+`1 / symbol_period = 6.25 Hz` (the FT8 tone spacing). Raising the sample rate
+simply produces more bins and extends the Nyquist ceiling upward, keeping the
+6.25 Hz base bin intact.
+
+### Target sample rate: 6400 sps
+
+To represent ~3000 Hz we need Nyquist > 3000, so **6400 sps** (Nyquist 3200 Hz).
+
+- RTL rate `2,400,000 / 6400 = 375` -> integer decimation ratio. So the RTL
+  input rate (2.4 Msps), the fs/4 mixer, and the tuning offset
+  (`realfreq + FS4_RATE`, FS4_RATE = SAMPLING_RATE/4) all stay valid. Only the
+  decimation ratio R changes 750 -> 375.
+- `block_size = 6400 x 0.16 = 1024` samples/symbol (integer, fine).
+- `NUM_BIN` doubles 256 -> 512, extending the ceiling 1600 -> 3200 Hz.
+
+Even at 6400 sps the *usable flat* region will still be inside Nyquist (RTL
+front-end + CIC droop), so the new FIR should be designed for perhaps
+~2800-2900 Hz, and the real edge must be **measured** with the mktestiq sweep,
+not assumed.
+
+---
+
+## The two pieces of work
+
+### Piece 1 - The last low-pass (CIC compensation FIR)
+
+**RESOLVED (Phase 1): no coefficient change is needed for 6400 sps.**
+
+The original `zCoef` was reproduced exactly from the authoritative
+WestCoastDSP/CIC_Octave_Matlab algorithm (`cic.m`): an inverse-CIC-droop
+passband target `abs(M*R*sin(pi*f/R)/sin(pi*M*f))^N` fed to `fir2(L, f, Mf)`,
+normalized to unity peak. Parameters R=750, N=2, M=1, L=56 (-> 57 taps),
+Fo=0.92 regenerate the in-tree coefficients to ~7 significant figures. This
+validated the method.
+
+Regenerating for **R=375** (the 6400 sps ratio) gives coefficients essentially
+identical to the R=750 set: `max|h375 - h750| = 1.5e-6`. The reason is that the
+compensation filter is designed in *normalized* frequency (fraction of output
+Nyquist), and for large decimation ratios the CIC droop over the normalized
+passband is nearly R-independent (`sin(pi*f/R) ~ pi*f/R`). So the SAME taps that
+compensate 0..1472 Hz at 3200 sps also compensate 0..2944 Hz at 6400 sps
+(Fo=0.92 x 3200 Hz Nyquist = 2944 Hz).
+
+**Consequence:** the existing `zCoef` can be reused unchanged at 6400 sps. No FIR
+table, no runtime coefficient synthesis. The only filter-related change is the
+CIC gain scale (`32768.0 * DOWNSAMPLING`), which already tracks DOWNSAMPLING.
+
+Generator (validated), for reference/reproducibility (needs Octave signal pkg):
+```octave
+p=2e3; s=0.25/p; fp=[0:s:Fo]; fs=(Fo+s):s:1; f=[fp fs];
+Mp=ones(1,length(fp));
+Mp(2:end)=abs(M*R*sin(pi*fp(2:end)/R)./sin(pi*M*fp(2:end))).^N;
+Mf=[Mp zeros(1,length(fs))]; f(end)=1;
+h=fir2(L,f,Mf); h=h/max(h);   % R=750,N=2,M=1,L=56,Fo=0.92 -> in-tree zCoef
+```
+
+NOTE: analytic cascade-flatness modeling of FIR x CIC was unreliable in review;
+the actual passband flatness at 6400 sps MUST be confirmed by the Phase 3
+`mktestiq -w -r 6400` sweep, not by hand calculation.
+
+### Piece 2 - Bin adaptation (the bulk of the effort)
+
+Every sizing constant is a **compile-time `#define`** that statically sizes
+global/stack buffers. A runtime parameter cannot just flip a value; the buffers
+must become dynamically allocated.
+
+| Item | Location | Current | Change for 6400 sps |
+|---|---|---|---|
+| `SAMPLING_RATE` | rtlsdr_ft8d.h | 2400000 | keep (2.4M / 6400 = 375) |
+| `DOWNSAMPLING` / R | rtlsdr_ft8d.h | 750 | 375 (runtime var) |
+| `SIGNAL_SAMPLE_RATE` | rtlsdr_ft8d.h | 3200 | 6400 (runtime var) |
+| CIC gain scale | rtlsdr_ft8d.cpp ~245 | `32768 * 750` | track R |
+| `zCoef` (FIR) | rtlsdr_ft8d.cpp ~143 | R=750 const array | **reuse unchanged** (R=375 taps identical) |
+| `NUM_BIN` | rtlsdr_ft8d.h | 256 | 512 (runtime) |
+| `BLOCK_SIZE`/`SUB`/`NFFT` | rtlsdr_ft8d.h | 512/256/1024 | 1024/512/2048 (runtime) |
+| `NUM_BLOCKS`/`MAG_ARRAY` | rtlsdr_ft8d.h | 92/94208 | ~92/188416 (runtime) |
+| `iSamples`/`qSamples` | rtlsdr_ft8d.h ~117 | static `[2][96000]` | heap alloc |
+| `mag_power` | rtlsdr_ft8d.cpp ~2183 | **~92 KB on stack** | **heap (mandatory)** |
+| `mag_db` | rtlsdr_ft8d.cpp ~2192 | `[NFFT]` stack | heap |
+| FFTW buffers / `hann` | rtlsdr_ft8d.cpp ~450 | `NFFT` | already runtime alloc (OK) |
+| `mon_cfg.f_max`/`.sample_rate` | rtlsdr_ft8d.cpp ~2247 | 1500/3200 | runtime, keep `max_bin <= NUM_BIN` |
+| ft8_lib decode/monitor | libft8/ | general | **no change** |
+| `noiseFloorPower` scratch | rtlsdr_ft8d.cpp ~1130 | `static float[8192]` | verify still big enough |
+
+---
+
+## Two implementation strategies
+
+### Strategy A - Compile-time `WIDEBAND` build variant (LOW effort, ~hours)
+
+A build option that redefines `SIGNAL_SAMPLE_RATE` to 6400 and `DOWNSAMPLING`
+to 375. Every other constant recomputes from the macros automatically. The
+compensation FIR (`zCoef`) is REUSED UNCHANGED (Phase 1 showed R=375 taps equal
+R=750). No dynamic allocation, no stack-overflow risk beyond checking the larger
+`mag_power`/`mag_db`. Cost: two build variants instead of one runtime flag.
+
+### Strategy B - Runtime `--bandwidth` / `--wide` flag (MODERATE effort, ~1-2 days)
+
+A true runtime flag: convert the ~7 sizing macros to runtime variables,
+heap-allocate the 4 buffer groups (`iSamples`, `qSamples`, `mag_power`,
+`mag_db`), add the FIR coefficient table, plumb the flag through
+`receiver_options`, and re-verify. Cleaner UX; this is where the real effort and
+regression risk lives (dynamic-buffer conversion).
+
+**Recommendation:** Start with Strategy A (safe, fast, proves the DSP works
+end-to-end at 6400 sps and validates the new FIR). Promote to Strategy B later
+if a runtime flag is desired, reusing the proven wideband constants and FIR.
+
+---
+
+## Phased steps
+
+- [x] **Phase 0 - Baseline & measurement harness.** DONE. `mktestiq` extended
+      with `-s F` sweep, `-w` wideband vector, `-r RATE` (heap buffers). Baseline
+      measured: hard edge at 1600 Hz (bin ceiling), 1550 Hz decodes at +19 dB.
+      See "Phase 0 results" below. No regression in default/self-test vectors.
+- [x] **Phase 1 - CIC compensation FIR.** DONE / RESOLVED. Reproduced the
+      original R=750 taps exactly from the WestCoastDSP `fir2` algorithm
+      (method validated), then found R=375 taps are identical to R=750
+      (max diff 1.5e-6) because the filter is designed in normalized frequency.
+      **The existing `zCoef` is reused unchanged at 6400 sps** - no new table.
+      See "Piece 1" above.
+- [ ] **Phase 2 - Strategy A (compile-time WIDEBAND).** Add the build variant:
+      `SIGNAL_SAMPLE_RATE` 6400, `DOWNSAMPLING` 375, second `zCoef` table,
+      track CIC gain scale, raise `mon_cfg.f_max` accordingly (keep
+      `max_bin <= NUM_BIN`). Move `mag_power`/`mag_db` off the stack if the
+      larger sizes risk overflow.
+- [ ] **Phase 3 - Verify.** Clean `-Wall -Wextra` build (x86 + ARM). Run the
+      mktestiq wideband decode and the sweep; confirm signals decode across the
+      widened band and measure the real flat edge. Self-test passes. Update
+      CHANGELOG + version.
+- [ ] **Phase 4 (optional) - Strategy B (runtime flag).** Convert sizing macros
+      to runtime variables, heap-allocate the buffer groups, plumb a
+      `--bandwidth`/`--wide` flag through `receiver_options`, keep the narrow
+      mode as default for compatibility, re-verify.
+
+---
+
+## Phase 0 results (measured baseline, v0.8.7, narrow build)
+
+`mktestiq` extended with `-s F` (single-tone sweep), `-w` (wideband 0..3000 Hz
+vector) and `-r RATE` (output sample rate). Buffers are now heap-allocated so
+the tool can emit 6400 sps vectors too. Default and self-test vectors unchanged
+(no regression: default vector still decodes 400/800/1200/1500 -> dial+audio).
+
+Single-tone sweep (CQ K1JT FN20, dial 20 m = 14074000), current 3200 sps chain:
+
+| audio Hz | decoded | reported RF | SNR |
+|---:|:--:|---:|---:|
+| 1300 | YES | 14075278 | +18 |
+| 1350 | YES | 14075328 | +17 |
+| 1400 | YES | 14075378 | +18 |
+| 1450 | YES | 14075428 | +17 |
+| 1472 | YES | 14075450 | +18 |
+| 1500 | YES | 14075478 | +18 |
+| 1550 | YES | 14075528 | +19 |
+| 1600 | no  | -          | -  |
+| 1650..2000 | no | - | - |
+
+**Findings:**
+- Hard cutoff at exactly **1600 Hz** = `NUM_BIN(256) x 6.25 Hz`. This is the FFT
+  bin ceiling, NOT the FIR roll-off: 1550 Hz still decodes strongly (+19 dB).
+- Confirms the plan's premise: **raising NUM_BIN (via sample rate) is what
+  unlocks the band.** The FIR redesign is about keeping the passband flat up to
+  the new edge, not about moving this hard wall.
+- The current `f_max = 1500` cap is slightly conservative vs the measured 1550
+  edge; that margin is fine and intentional (stays clear of the wall).
+- Reported RF tracks dial + audio exactly across the whole range -> frequency
+  mapping (v0.8.7) is correct.
+
+Re-run this sweep after Phase 2 to measure the widened edge (expect signals to
+keep decoding well past 1600 Hz toward ~2800-2900 Hz at 6400 sps).
+
+Sweep command used:
+```
+for f in 1300 1350 1400 1450 1472 1500 1550 1600 1650 1700 1800 1900 2000; do
+  ./mktestiq -s $f /tmp/sweep.iq
+  ./rtlsdr_ft8d -r /tmp/sweep.iq -x -f 20m -c N0CALL -l AA00 | grep K1JT
+done
+```
+
+---
+
+## Constraints / notes
+
+- TX audio window must track the RX passband (`qsoHandler.cpp` TX_AUDIO_MIN/MAX,
+  `ft8_ncurses.cpp` default display freq) so we only transmit where we can also
+  receive. Currently 300-1400 Hz for the 200-1500 passband; widen in step.
+- FS4_RATE and the RTL tuning offset stay valid (SAMPLING_RATE unchanged).
+- ARM/RPi is the primary target: watch the extra CPU (2x FFT size, 2x FIR work
+  per second) and memory (buffers ~2x) on the Pi. Benchmark on the Pi before
+  declaring done.
+- Do not fabricate the wideband usable edge; measure it (Phase 0/3 harness).
+- All git operations are performed by the user.
