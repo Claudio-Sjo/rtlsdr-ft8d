@@ -142,11 +142,12 @@ if a runtime flag is desired, reusing the proven wideband constants and FIR.
       (max diff 1.5e-6) because the filter is designed in normalized frequency.
       **The existing `zCoef` is reused unchanged at 6400 sps** - no new table.
       See "Piece 1" above.
-- [x] **Phase 2 - Strategy A (compile-time WIDEBAND).** DONE. Added the
-      `WIDEBAND` compile switch (`make wideband`): `SIGNAL_SAMPLE_RATE` 6400,
-      `DOWNSAMPLING` 375, `RX_AUDIO_MAX` 2900; `zCoef` reused unchanged. Moved
-      `mag_power` (~184 KB at wideband) and `mag_db` off the stack to the heap.
-      Both narrow and wideband build clean (-Wall -Wextra, x86).
+- [x] **Phase 2 - Strategy A (compile-time WIDEBAND).** DONE, and WIDE IS NOW
+      THE DEFAULT build. `SIGNAL_SAMPLE_RATE` 6400, `DOWNSAMPLING` 375,
+      `RX_AUDIO_MAX` 2900; `zCoef` reused unchanged; `mag_power`/`mag_db` moved
+      to heap. Legacy narrow chain available via `make narrowband`
+      (-DNARROWBAND). Both build clean (-Wall -Wextra, x86). Results consolidated
+      in rx-characterization.md.
 - [x] **Phase 3 - Verify.** DONE (x86). Wideband build decodes all 6 wideband
       test signals (incl. 1800/2300/2800 Hz, impossible before) at correct
       dial+audio. Edge sweep: decodes cleanly through 3100 Hz (stops only at the
@@ -162,6 +163,63 @@ if a runtime flag is desired, reusing the proven wideband constants and FIR.
       mode as default for compatibility, re-verify.
 
 ---
+
+## Phase 3c results (decode sensitivity / SNR floor, x86)
+
+`mktestiq` gained `-A amp` (signal amplitude), `-N amp` (WGN stddev) and
+`-S seed` (RNG seed) so the decode SNR floor can be probed statistically.
+Single signal (CQ K1JT FN20), signal amp 0.05, noise raised, 20 seeds/level:
+
+| noise stddev | decode success | reported SNR |
+|--:|:--|:--:|
+| <= 0.32 | 20/20 (100%) | -24 dB |
+| 0.34 | 19/20 (95%) | -24 dB |
+| 0.36 | 15/20 (75%) | -24 dB |
+| 0.40 | 4/20 (20%) | -24 dB |
+| 0.45 | 0/20 | - |
+
+Findings:
+- **Decode floor ~ -24 dB reported SNR.** 100% reliable to -24 dB, then a
+  probabilistic S-curve cliff (typical of LDPC/FEC near threshold), zero below.
+- Reported SNR pins at -24 dB through the failing region: that is also the
+  estimator's floor, so success PROBABILITY (not the reported number)
+  characterizes the true threshold.
+- Consistent with WSJT-X's published FT8 ~ -21 dB (50%) threshold in the
+  2500 Hz reference bandwidth; the synthetic AWGN test (no fading) is a bit more
+  favorable than real HF, and the estimator calibration accounts for the rest.
+- **Sensitivity is uniform across the band:** wideband floor at 2500 Hz (high
+  end) equals mid-band 1000 Hz (both 20/20 through noise 0.38) - the flat
+  compensated passband gives no weak-signal penalty near the upper edge.
+  Wideband held marginally better at the floor (2x noise samples averaged per
+  bin over the 15 s slot).
+
+## Phase 3b results (parallel-decode stress test, x86)
+
+`mktestiq -n N` added: generates N distinct-callsign signals spread evenly
+across the usable band (edge follows -r rate). Equal amplitude, so per-signal
+SNR falls as N rises (shared power budget). Decoded-count comparison:
+
+| N | narrow decoded (spacing) | wideband decoded (spacing) |
+|--:|:--|:--|
+| 5..25 | all | all |
+| 28 | 28 (44 Hz) | - |
+| 30 | 29 (41 Hz) | 30 (90 Hz) |
+| 40 | 26 (31 Hz) | 40 (67 Hz) |
+| 45 | - | 45 (59 Hz) |
+| 50 | 2 (24 Hz, jammed) | 50 (53 Hz) |
+| 55/60 | - | 50 (cap) |
+
+Findings:
+- Controlling variable is per-signal spacing vs the ~50 Hz FT8 signal width.
+- **Narrow** (200..1500, ~1250 Hz usable): ~28-29 parallel signals before
+  overlap degrades it; collapses when packed below ~50 Hz spacing.
+- **Wideband** (200..2900, ~2600 Hz usable): 45+ cleanly; saturates at 50 only
+  because of `K_MAX_MESSAGES=50` (report array), not the DSP.
+- Wideband ~doubles parallel-decode capacity, in proportion to the ~2x wider
+  spectrum. Decodes verified genuine (correct callsigns/grids, freq = dial+audio
+  within bin resolution; SNR ~-8 dB at N=40 as expected for equal-power stacking).
+- If >50 simultaneous decodes are ever wanted, raise K_MAX_MESSAGES (and check
+  K_MAX_CANDIDATES=120) - a separate, small change.
 
 ## Phase 0 results (measured baseline, v0.8.7, narrow build)
 

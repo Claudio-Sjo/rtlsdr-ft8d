@@ -54,6 +54,9 @@ extern "C" {
 
 static int gSampleRate = 3200;  /* output sample rate, -r overrides */
 static int gNsamp = SIGNAL_LENGHT * 3200;
+static double gNoiseAmp = 0.02;   /* WGN stddev per I/Q sample, -N overrides */
+static double gSigAmp = 0.7;      /* per-signal amplitude, -A overrides */
+static unsigned gSeed = 12345;    /* RNG seed, -S overrides (for stats) */
 
 static float *iBuf = NULL;
 static float *qBuf = NULL;
@@ -143,10 +146,16 @@ static int writeIq(const char *outName, int nSignals) {
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [-w] [-s F] [-r RATE] [outfile]\n"
+            "usage: %s [-w] [-s F] [-n N] [-r RATE] [outfile]\n"
             "  (default)  multi-signal band vector 400/800/1200/1500 Hz\n"
             "  -w         wideband vector spread across 0..3000 Hz\n"
             "  -s F       single signal at audio F Hz (for edge sweeps)\n"
+            "  -n N       N distinct signals spread evenly across the band\n"
+            "             (stress parallel decoding; edge follows -r rate)\n"
+            "  -A amp     per-signal amplitude for -s sweep (default 0.7)\n"
+            "  -N amp     WGN stddev per I/Q sample (default 0.02); lower signal\n"
+            "             amp or raise noise to probe the decode SNR floor\n"
+            "  -S seed    RNG seed (default 12345); vary for noise statistics\n"
             "  -r RATE    output sample rate (default 3200; 6400 for wideband)\n"
             "  outfile    output file name (default test_band.iq)\n",
             prog);
@@ -156,6 +165,7 @@ int main(int argc, char **argv) {
     const char *outName = "test_band.iq";
     int wideband = 0;
     double sweepFreq = -1.0;  /* >=0 selects single-signal sweep mode */
+    int dense = 0;            /* -n N: generate N signals spread across band */
 
     int argi = 1;
     for (; argi < argc; argi++) {
@@ -164,6 +174,18 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[argi], "-s")) {
             if (argi + 1 >= argc) { usage(argv[0]); return 1; }
             sweepFreq = atof(argv[++argi]);
+        } else if (!strcmp(argv[argi], "-n")) {
+            if (argi + 1 >= argc) { usage(argv[0]); return 1; }
+            dense = atoi(argv[++argi]);
+        } else if (!strcmp(argv[argi], "-N")) {
+            if (argi + 1 >= argc) { usage(argv[0]); return 1; }
+            gNoiseAmp = atof(argv[++argi]);
+        } else if (!strcmp(argv[argi], "-A")) {
+            if (argi + 1 >= argc) { usage(argv[0]); return 1; }
+            gSigAmp = atof(argv[++argi]);
+        } else if (!strcmp(argv[argi], "-S")) {
+            if (argi + 1 >= argc) { usage(argv[0]); return 1; }
+            gSeed = (unsigned)atoi(argv[++argi]);
         } else if (!strcmp(argv[argi], "-r")) {
             if (argi + 1 >= argc) { usage(argv[0]); return 1; }
             gSampleRate = atoi(argv[++argi]);
@@ -184,24 +206,58 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    srand(12345);  /* fixed seed -> reproducible test vector */
+    srand(gSeed);  /* seed -> reproducible vector; vary with -S for statistics */
 
-    /* Light noise floor so it looks like a real capture */
+    /* Light noise floor so it looks like a real capture (stddev = gNoiseAmp) */
     for (int i = 0; i < gNsamp; i++) {
-        iBuf[i] = wgn(0.02f);
-        qBuf[i] = wgn(0.02f);
+        iBuf[i] = wgn((float)gNoiseAmp);
+        qBuf[i] = wgn((float)gNoiseAmp);
     }
 
     int nSignals = 0;
 
-    if (sweepFreq >= 0.0) {
+    if (dense > 0) {
+        /* Dense mode: N signals with distinct standard callsigns spread evenly
+           across the usable band, to stress parallel decoding. Upper edge
+           depends on rate (narrow ~1500, wideband ~2900). Each FT8 signal is
+           ~50 Hz wide, so spacing must exceed that. */
+        double fLo = 250.0;
+        double fHi = (gSampleRate >= 6400) ? 2850.0 : 1450.0;
+        if (dense > 1 && (fHi - fLo) / (dense - 1) < 60.0) {
+            fprintf(stderr,
+                    "warning: %d signals across %.0f..%.0f Hz -> spacing %.1f Hz "
+                    "(< ~60 Hz, signals may overlap)\n",
+                    dense, fLo, fHi, (fHi - fLo) / (dense - 1));
+        }
+        const char *grids[] = {"FN20", "IO91", "JO62", "EM12", "JN58", "QF22",
+                               "IN80", "KP20", "FM19", "DM79", "CN87", "BP51"};
+        for (int s = 0; s < dense; s++) {
+            double audio = (dense == 1) ? (fLo + fHi) / 2.0
+                                        : fLo + (fHi - fLo) * s / (dense - 1);
+            /* Build a distinct, valid standard callsign: <L><D><L><L> pattern,
+               e.g. A1AA, B2AB, ... cycling letters and a digit. */
+            char call[8];
+            char c1 = 'A' + (s % 26);
+            int  d  = s % 10;
+            char c3 = 'A' + ((s / 26) % 26);
+            char c4 = 'A' + ((s / 3) % 26);
+            snprintf(call, sizeof(call), "%c%d%c%c", c1, d, c3, c4);
+            const char *grid = grids[s % (int)(sizeof(grids) / sizeof(grids[0]))];
+            char msg[32];
+            snprintf(msg, sizeof(msg), "CQ %s %s", call, grid);
+            if (addSignal(msg, audio, 0.7) < 0) return 1;
+            printf("added: %-16s @ %.0f Hz audio\n", msg, audio);
+        }
+        nSignals = dense;
+    } else if (sweepFreq >= 0.0) {
         /* Sweep mode: a single tone-signal at the requested audio frequency.
            A standard callsign so it decodes to full text (no hash table). */
         char msg[32];
         snprintf(msg, sizeof(msg), "CQ K1JT FN20");
-        if (addSignal(msg, sweepFreq, 0.7) < 0) return 1;
+        if (addSignal(msg, sweepFreq, gSigAmp) < 0) return 1;
         nSignals = 1;
-        printf("sweep: %-14s @ %.1f Hz audio\n", msg, sweepFreq);
+        printf("sweep: %-14s @ %.1f Hz audio (sigAmp=%.4f noiseAmp=%.4f)\n",
+               msg, sweepFreq, gSigAmp, gNoiseAmp);
     } else if (wideband) {
         /* Wideband vector across the full WSJT-X 0..3000 Hz audio window.
            Kept a little inside the edges. Standard calls -> full text. */
