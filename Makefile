@@ -66,9 +66,17 @@ else
 TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon calibrate
 endif
 
-.PHONY: all clean
+.PHONY: all clean wideband
 
 all: $(TARGETS)
+
+# Wideband build: run the receiver baseband at 6400 sps (vs 3200) to widen the
+# usable audio passband toward WSJT-X's full ~3 kHz. See wideband_plan.md.
+# Forces a clean rebuild since the change is via a compile-time -D flag that the
+# per-object timestamps don't track. Usage: `make wideband`.
+wideband:
+	$(MAKE) clean
+	$(MAKE) all PI_VERSION="$(PI_VERSION) -DWIDEBAND"
 
 #%.o: %.c
 #	${CXX} ${CXXFLAGS} $(PI_VERSION) -c $< -o $@

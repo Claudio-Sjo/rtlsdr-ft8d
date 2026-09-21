@@ -142,15 +142,20 @@ if a runtime flag is desired, reusing the proven wideband constants and FIR.
       (max diff 1.5e-6) because the filter is designed in normalized frequency.
       **The existing `zCoef` is reused unchanged at 6400 sps** - no new table.
       See "Piece 1" above.
-- [ ] **Phase 2 - Strategy A (compile-time WIDEBAND).** Add the build variant:
-      `SIGNAL_SAMPLE_RATE` 6400, `DOWNSAMPLING` 375, second `zCoef` table,
-      track CIC gain scale, raise `mon_cfg.f_max` accordingly (keep
-      `max_bin <= NUM_BIN`). Move `mag_power`/`mag_db` off the stack if the
-      larger sizes risk overflow.
-- [ ] **Phase 3 - Verify.** Clean `-Wall -Wextra` build (x86 + ARM). Run the
-      mktestiq wideband decode and the sweep; confirm signals decode across the
-      widened band and measure the real flat edge. Self-test passes. Update
-      CHANGELOG + version.
+- [x] **Phase 2 - Strategy A (compile-time WIDEBAND).** DONE. Added the
+      `WIDEBAND` compile switch (`make wideband`): `SIGNAL_SAMPLE_RATE` 6400,
+      `DOWNSAMPLING` 375, `RX_AUDIO_MAX` 2900; `zCoef` reused unchanged. Moved
+      `mag_power` (~184 KB at wideband) and `mag_db` off the stack to the heap.
+      Both narrow and wideband build clean (-Wall -Wextra, x86).
+- [x] **Phase 3 - Verify.** DONE (x86). Wideband build decodes all 6 wideband
+      test signals (incl. 1800/2300/2800 Hz, impossible before) at correct
+      dial+audio. Edge sweep: decodes cleanly through 3100 Hz (stops only at the
+      3200 Hz Nyquist/bin ceiling); the RX_AUDIO_MAX=2900 cap is conservative.
+      CPU comparison (decode work per 15 s slot, identical 4-signal content):
+      narrow 26.4 ms vs wideband 31.1 ms = **1.18x** (only +18% despite 2x
+      sample rate/NFFT/bins, because LDPC+Costas cost is content-driven, not
+      FFT-size-driven). STILL TODO: benchmark on the actual RPi 2/3 to confirm
+      the wideband decode fits the 15 s slot budget; update CHANGELOG + version.
 - [ ] **Phase 4 (optional) - Strategy B (runtime flag).** Convert sizing macros
       to runtime variables, heap-allocate the buffer groups, plumb a
       `--bandwidth`/`--wide` flag through `receiver_options`, keep the narrow
@@ -204,6 +209,12 @@ done
 ---
 
 ## Constraints / notes
+
+- Benchmark harness: `decodeRecordedFile` honors `FT8D_BENCH=N` to re-run
+  `ft8_subsystem` N times and print mean wall/CPU ms (stdout, "BENCH:" line).
+  Env-gated, once per file decode, negligible overhead when unset. Kept for the
+  pending on-Pi measurement. Example:
+  `FT8D_BENCH=300 ./rtlsdr_ft8d -r vec.iq -x -f 20m -c N0CALL -l AA00`
 
 - TX audio window must track the RX passband (`qsoHandler.cpp` TX_AUDIO_MIN/MAX,
   `ft8_ncurses.cpp` default display freq) so we only transmit where we can also
