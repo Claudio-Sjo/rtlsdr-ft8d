@@ -1,5 +1,31 @@
 ## CHANGELOG
 
+### 0.8.7
+
+- **Capped the receiver monitor passband at `f_max = 1500 Hz`** (was 3000). The
+  decimation chain (CIC R=750, N=2 followed by a compensation FIR designed with
+  F0=0.92, edge ~1472 Hz) rolls off well below the 1600 Hz waterfall ceiling set
+  by `NUM_BIN=256 * 6.25 Hz`. The previous 3000 Hz value also produced
+  `max_bin = f_max * symbol_period + 1 > NUM_BIN`, an out-of-range bin index.
+  Empirically the receiver decodes signals through 1500 Hz and fails at 1800 Hz,
+  so 1500 Hz is the honest usable edge. Usable audio passband is now
+  200..1500 Hz (~1300 Hz wide, centred ~850 Hz).
+- **Tuned the RTL center to the dial frequency (removed the legacy +1500 Hz
+  offset).** The receiver now tunes to `realfreq + FS4_RATE` so, after the fs/4
+  digital mixer, a signal at `RF = dial + f_audio` lands at baseband `f_audio`.
+  This implements the WSJT-X USB convention `f_RF = f_dial + f_audio` directly,
+  keeping the reported `RF = dial + audio` correct with no offset compensation.
+  The old +1500 offset ("tune 1500 Hz below") pushed the activity onto the upper
+  filter roll-off and, with the new f_max cap, past the passband ceiling. NOTE:
+  absolute reported frequencies now differ from earlier builds for the same
+  real signals, because the +1500 placement is gone; a station at dial+800 Hz
+  now correctly reports as dial+800.
+- **Aligned the TX audio window with the RX passband.** The CQ transmit
+  frequency randomizer now picks audio in 300..1400 Hz (was 300..2700) so this
+  transceiver only transmits where its own receiver can decode, with margin
+  below the filter roll-off. The default QSO display frequency is now
+  `dial + 850` (mid-passband) instead of `dial + 1500`.
+
 ### 0.8.6
 
 - **Vendored ft8_lib as an in-tree `libft8/`.** The decoder library is now a

@@ -88,9 +88,18 @@ extern std::vector<FT8Msg> tx_queue;
  * stay clear of DC), like a normal WSJT-X station selecting a clear slot. The
  * resulting absolute RF (dial + audio) is what ft8 transmits verbatim and what
  * the receiver reports, so both ends agree.
+ *
+ * NOTE: this transceiver's own usable passband is narrower than WSJT-X's full
+ * ~3 kHz. The RX decimation chain (see rtlsdr_ft8d.cpp) caps the monitor at
+ * f_max = 1500 Hz, so the TX audio window below is kept inside 200..1500 Hz so
+ * that what we transmit is also what this same receiver can decode.
  */
 #define TX_AUDIO_MIN 300   // Hz, low edge of the usable audio passband for TX
-#define TX_AUDIO_MAX 2700  // Hz, high edge of the usable audio passband for TX
+#define TX_AUDIO_MAX 1400  // Hz, high edge of the usable audio passband for TX
+                           // Kept inside the RX passband (f_min=200, f_max=1500)
+                           // so our own transmissions land where this same
+                           // transceiver can receive them, with margin below
+                           // the decimation-filter roll-off edge (~1472 Hz).
 
 /* Return a CQ transmit frequency: dial + a random audio offset within
    [TX_AUDIO_MIN, TX_AUDIO_MAX]. This is a true absolute RF frequency. */

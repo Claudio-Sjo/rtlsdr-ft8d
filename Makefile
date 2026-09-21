@@ -100,8 +100,16 @@ calibrate: $(OBJCAL)
 	$(CXX) -o $@ $^ $(LIBS)
 
 
+# Host-side test-vector generator (not part of 'all'). Builds an .iq file of
+# several standard-callsign FT8 signals for hardware-free decode verification.
+OBJMKTEST = mktestiq.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/ldpc.o
+
+mktestiq: $(OBJMKTEST)
+	$(CXX) -o $@ $^ $(LIBS)
+
+
 clean:
-	rm -f *.o libft8/ft8/*.o libft8/common/*.o libft8/fft/*.o rtlsdr_ft8d ft8 client sk150lm_beacon calibrate fftw_wisdom.dat selftest.iq
+	rm -f *.o libft8/ft8/*.o libft8/common/*.o libft8/fft/*.o rtlsdr_ft8d ft8 client sk150lm_beacon calibrate mktestiq fftw_wisdom.dat selftest.iq test_band.iq
 
 ifdef IS_X86
 install:

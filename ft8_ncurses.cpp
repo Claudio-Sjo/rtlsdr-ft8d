@@ -121,7 +121,11 @@ int init_ncurses(uint32_t initialFreq) {
         Initialize the working values from the main program
     */
 
-    qsoFreq = initialFreq + 1500;  // Base freq + 1500Hz offset
+    qsoFreq = initialFreq + 850;  // Default display freq: dial + mid-passband
+                                  // (usable audio 200..1500 Hz -> centre ~850).
+                                  // Actual TX freq is chosen per-CQ by
+                                  // cqTxFrequency(); this is only the initial
+                                  // header value before the first transmission.
     reportedCQ = 0;
 
     /*

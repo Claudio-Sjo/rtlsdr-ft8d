@@ -866,6 +866,20 @@ void decodeRecordedFile(char *filename) {
         unixtime = unixtime - 120 + 1;
         gmtime_r(&unixtime, &rx_state.gtm);
 
+        /* Print the decoded results directly to stdout. The -r path runs on the
+           main thread and exits without the ncurses UI/queue-consumer threads,
+           so results are printed here to make headless file decoding (and
+           hardware-free testing) observable. Reported RF = dial + audio. */
+        printf("Decoded %d message(s):\n", n_results);
+        for (int32_t i = 0; i < n_results; i++) {
+            printf("  %8d Hz  %+3d dB  %-5s %-12s %-6s\n",
+                   dec_results[i].freq + dec_options.freq,
+                   dec_results[i].snr,
+                   dec_results[i].cmd,
+                   dec_results[i].call,
+                   dec_results[i].loc);
+        }
+
         printSpots(n_results);
     }
 }
@@ -1404,12 +1418,13 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
                 strPtr = strtok(NULL, " ");  // Move on the Locator part
                 snprintf(decodes[num_decoded].loc, sizeof(decodes[num_decoded].loc), "%.6s", strPtr ? strPtr : "");
 
-                /* Reported RF = dial + audio. FT8 is USB and the receiver is
-                   arranged so the decoder's audio frequency equals the true
-                   USB audio offset from the dial (band centre ~1500 Hz), so a
-                   band-centre signal (audio ~1500) reports as dial + 1500.
-                   This field is audio-relative (postSpots/printSpots add the
-                   dial), so store just freq_hz. */
+                /* Reported RF = dial + audio. FT8 is USB (f_RF = f_dial +
+                   f_audio) and the RTL is now tuned directly to the dial (in
+                   the fs/4 frame), so the decoder's audio frequency equals the
+                   true USB audio offset from the dial: a signal at dial + N Hz
+                   decodes at audio N and reports as dial + N. This field is
+                   audio-relative (postSpots/printSpots add the dial), so store
+                   just freq_hz. */
                 decodes[num_decoded].freq = (int32_t)freq_hz;
                 decodes[num_decoded].snr = estSnr;  // real SNR estimate (dB, 2500 Hz ref)
                 decodes[num_decoded].tempus = current_time;
@@ -1571,7 +1586,15 @@ bool startRtlDevice(char *resultText) {
         rtl_device = NULL;
         return false;
     }
-    rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE + 1500);
+    /* Tune the RTL center to the dial frequency (in the fs/4 frame). The digital
+       fs/4 mixer removes FS4_RATE, so a signal at RF = dial + f_audio lands at
+       baseband f_audio. This implements the standard WSJT-X USB convention
+       f_RF = f_dial + f_audio directly, so the reported RF = dial + audio is
+       correct with no offset compensation. The former +1500 offset placed the
+       dial 1500 Hz into the audio band (a legacy "tune 1500 Hz below" artifact);
+       with the honest 200-1500 Hz passband it pushed the activity onto the
+       upper roll-off edge and beyond the f_max cap. */
+    rtl_result = rtlsdr_set_center_freq(rtl_device, rx_options.realfreq + FS4_RATE);
     if (rtl_result < 0) {
         sprintf(resultText, "Cannot set center frequency\n");
         rtlsdr_close(rtl_device);
@@ -2223,7 +2246,12 @@ wrefresh(trafficW);
     monitor_t mon;
     monitor_config_t mon_cfg = {
         .f_min = 200,
-        .f_max = 3000,
+        /* f_max capped at 1500 Hz: the decimation chain (CIC R=750,N=2 +
+           compensation FIR designed with F0=0.92 -> ~1472 Hz edge) rolls off
+           below the 1600 Hz waterfall ceiling (NUM_BIN=256 * 6.25 Hz). A value
+           above 1600 also produces max_bin > NUM_BIN, an out-of-range index.
+           Empirically signals decode through 1500 Hz and fail at 1800 Hz. */
+        .f_max = 1500,
         .sample_rate = SIGNAL_SAMPLE_RATE,
         .time_osr = K_TIME_OSR,
         .freq_osr = K_FREQ_OSR,
