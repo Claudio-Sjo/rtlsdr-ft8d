@@ -137,9 +137,13 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
     /* FIR compensation filter coefs
        Using : Octave/MATLAB code for generating compensation FIR coefficients
        URL : https://github.com/WestCoastDSP/CIC_Octave_Matlab
+       See dsp-chain.md for how these were derived and re-verified.
      */
 
-    /* Coefs with R=750, M=1, N=2, F0=0.92, L=54 */
+    /* Coefs with R=750, M=1, N=2, F0=0.92, L=56 (57 taps). These are reused
+       unchanged for the wide default (R=375): because the compensator is
+       designed in normalized frequency, the CIC droop is nearly R-independent
+       for large R (R=375 vs R=750 taps differ by <2e-6). See dsp-chain.md. */
     const static float zCoef[FIR_TAPS + 1] = {
         -0.0025719973, 0.0010118403, 0.0009110571, -0.0034940765,
         0.0069713409, -0.0114242790, 0.0167023466, -0.0223683056,
@@ -860,6 +864,31 @@ void decodeRecordedFile(char *filename) {
     if (samples_len) {
         /* Search & decode the signal */
         ft8_subsystem(iSamples, qSamples, samples_len, dec_results, &n_results);
+
+        /* Optional micro-benchmark: FT8D_BENCH=N re-runs the decode N times and
+           reports mean wall/CPU time for the DSP+decode work only (no process
+           startup or file I/O). Used to compare narrow vs wideband CPU cost. */
+        const char *benchEnv = getenv("FT8D_BENCH");
+        if (benchEnv) {
+            int iters = atoi(benchEnv);
+            if (iters > 0) {
+                struct timespec t0, t1;
+                clock_t c0 = clock();
+                clock_gettime(CLOCK_MONOTONIC, &t0);
+                int dummy = 0;
+                for (int b = 0; b < iters; b++)
+                    ft8_subsystem(iSamples, qSamples, samples_len, dec_results, &dummy);
+                clock_gettime(CLOCK_MONOTONIC, &t1);
+                clock_t c1 = clock();
+                double wall = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
+                double cpu = (double)(c1 - c0) / CLOCKS_PER_SEC;
+                printf("BENCH: %d iters  sample_rate=%d NFFT=%d NUM_BIN=%d  "
+                       "mean wall=%.3f ms  mean cpu=%.3f ms\n",
+                       iters, SIGNAL_SAMPLE_RATE, NFFT, NUM_BIN,
+                       wall / iters * 1000.0, cpu / iters * 1000.0);
+                fflush(stdout);
+            }
+        }
 
         time_t unixtime;
         time(&unixtime);
@@ -2179,8 +2208,18 @@ void ft8_subsystem(float *iSamples,
                    int32_t *n_results) {
     // UPDATE: adjust with samples_len !!
 
-    // Compute FFT over the whole signal and store it
-    uint8_t mag_power[MAG_ARRAY];
+    // Compute FFT over the whole signal and store it.
+    // Heap-allocated: at WIDEBAND (6400 sps) MAG_ARRAY ~184 KB and NFFT=2048,
+    // too large for a thread stack. mag_db is hoisted out of the loop too.
+    uint8_t *mag_power = (uint8_t *)malloc(MAG_ARRAY * sizeof(uint8_t));
+    float *mag_db = (float *)malloc(NFFT * sizeof(float));
+    if (mag_power == NULL || mag_db == NULL) {
+        LOG(LOG_ERROR, "ft8_subsystem: out of memory (mag buffers)\n");
+        free(mag_power);
+        free(mag_db);
+        *n_results = 0;
+        return;
+    }
 
     int offset = 0;
     float max_mag = -120.0f;
@@ -2188,7 +2227,6 @@ void ft8_subsystem(float *iSamples,
     for (uint32_t idx_block = 0; idx_block < NUM_BLOCKS; ++idx_block) {
         // Loop over two possible time offsets (0 and BLOCK_SIZE/2)
         for (uint32_t time_sub = 0; time_sub < K_TIME_OSR; ++time_sub) {
-            float mag_db[NFFT];
 
             // UPDATE : try FFT over 2 symbols, stepped by half symbols
             for (uint32_t i = 0; i < NFFT; ++i) {
@@ -2245,13 +2283,13 @@ wrefresh(trafficW);
 
     monitor_t mon;
     monitor_config_t mon_cfg = {
-        .f_min = 200,
-        /* f_max capped at 1500 Hz: the decimation chain (CIC R=750,N=2 +
-           compensation FIR designed with F0=0.92 -> ~1472 Hz edge) rolls off
-           below the 1600 Hz waterfall ceiling (NUM_BIN=256 * 6.25 Hz). A value
-           above 1600 also produces max_bin > NUM_BIN, an out-of-range index.
-           Empirically signals decode through 1500 Hz and fail at 1800 Hz. */
-        .f_max = 1500,
+        .f_min = RX_AUDIO_MIN,
+        /* f_max = RX_AUDIO_MAX (rtlsdr_ft8d.h). Capped by the decimation chain
+           (CIC + compensation FIR, ~0.92*Nyquist edge) below the waterfall bin
+           ceiling (NUM_BIN * 6.25 Hz = 1600 Hz narrow / 3200 Hz wideband). A
+           value above the ceiling produces max_bin > NUM_BIN, an out-of-range
+           index. See wideband_plan.md. */
+        .f_max = RX_AUDIO_MAX,
         .sample_rate = SIGNAL_SAMPLE_RATE,
         .time_osr = K_TIME_OSR,
         .freq_osr = K_FREQ_OSR,
@@ -2278,6 +2316,9 @@ wrefresh(trafficW);
     mon.wf.protocol = FTX_PROTOCOL_FT8;
 
     decode(&mon, NULL, decodes, n_results);
+
+    free(mag_power);
+    free(mag_db);
 }
 
 void enableReporting(void) {

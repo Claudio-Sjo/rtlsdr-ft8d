@@ -7,3 +7,11 @@ client
 ft8
 ft8_lib/
 .vscode
+
+# Build artifacts (host test tools / other targets)
+mktestiq
+sk150lm_beacon
+calibrate
+
+# Windows "mark of the web" NTFS alternate-data-stream artifacts
+*:Zone.Identifier

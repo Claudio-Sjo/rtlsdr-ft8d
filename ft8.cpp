@@ -163,6 +163,33 @@ extern "C" {
 // offset from dial frequency
 #define FT8_TXOFS 1250
 
+/* Option 3 -- transmitter chooses the audio slot for CQ.
+ * When the receiver requests a transmission it sends a single frequency:
+ *   - if it equals a BAND BASE (the official dial for a band), ft8 chooses a
+ *     random audio offset within [TX_AUDIO_MIN, TX_AUDIO_MAX] and transmits
+ *     dial + offset;
+ *   - otherwise (a frequency "inside the band", e.g. a QSO reply on the peer's
+ *     frequency) ft8 transmits it verbatim.
+ * Either way ft8 reports the actual transmitted frequency back to the receiver.
+ * The window matches the receiver's wide usable passband (200..2900 Hz) with a
+ * safety margin; keep in sync with RX_AUDIO_MIN/MAX in rtlsdr_ft8d.h. */
+#define TX_AUDIO_MIN 300   // Hz
+#define TX_AUDIO_MAX 2800  // Hz
+
+// Band base (dial) frequencies in Hz -- must match the band table in
+// parse_commandline(). Used to recognise a "band base" request (Option 3).
+static const long kBandBase[] = {
+    1840000, 3573000, 5357000, 7074000, 10136000, 14074000,
+    18100000, 21074000, 24915000, 28074000, 50313000, 70100000, 144174000};
+
+// True if freq (Hz) is exactly one of the known band base frequencies.
+static bool isBandBase(long freq) {
+    for (unsigned i = 0; i < sizeof(kBandBase) / sizeof(kBandBase[0]); i++)
+        if (freq == kBandBase[i])
+            return true;
+    return false;
+}
+
 #define NSYM 79
 
 // Choose proper base address depending on RPI1/RPI23 macro from makefile.
@@ -562,6 +589,7 @@ int main(const int argc, char *const argv[]) {
 }
 
 void handleBrokenPipe(int signo) {
+    (void)signo;
     printf("Received SIGPIPE\n");
     new_socket = 0;
 }
@@ -1559,16 +1587,34 @@ int mainFT8(const int argc, char *const argv[]) {
             double ft8_symtime = FT8_SYMTIME;
             double tone_spacing = 1.0 / ft8_symtime;
 
-            /* NOTE: the random frequency offset now lives on the receiver side.
-             * rtlsdr_ft8d is the single authority on the actual transmit
-             * frequency: it computes the exact absolute frequency (including
-             * any randomization for CQ) and passes it over the socket, and ft8
-             * transmits it verbatim -- so the frequency the receiver shows,
-             * logs and reports is the true transmitted frequency. Socket
-             * requests never set random_offset; the -o flag therefore only
-             * affects standalone command-line transmissions. */
+            /* Option 3: if the receiver sent a BAND BASE frequency (the official
+             * dial), the transmitter chooses the audio slot here; if it sent a
+             * frequency inside the band (e.g. a QSO reply on the peer's
+             * frequency), use it verbatim. The chosen frequency is reported back
+             * to the receiver below so it displays/logs the true value. */
+            if (isBandBase((long)llround(center_freq_desired))) {
+                int32_t audio = TX_AUDIO_MIN +
+                                (int32_t)((rand() / ((double)RAND_MAX + 1.0)) *
+                                          (TX_AUDIO_MAX - TX_AUDIO_MIN));
+                center_freq_desired += audio;
+            }
+
+            /* The legacy --offset flag still nudges standalone CLI transmissions
+             * (socket requests never set random_offset). */
             if ((center_freq_desired != 0) && random_offset) {
                 center_freq_desired += (2.0 * rand() / ((double)RAND_MAX + 1.0) - 1.0) * (FT8_RAND_OFFSET);
+            }
+
+            /* Report the actual transmit frequency back to the receiver over the
+             * socket (Option 3). new_socket is the connected client fd for a
+             * SEND_F8_REQ; it is 0 for standalone CLI use, which we skip. */
+            if (new_socket > 0) {
+                FT8Msg FreqMsg;
+                FreqMsg.type = CHANGE_RTX_STATE;
+                FreqMsg.RTXstate = true;
+                snprintf(FreqMsg.ft8Message, MAXMSGSIZE, "FREQ %ld",
+                         (long)llround(center_freq_desired));
+                send(new_socket, &FreqMsg, sizeof(FreqMsg), 0);
             }
 
             // Status message before transmission

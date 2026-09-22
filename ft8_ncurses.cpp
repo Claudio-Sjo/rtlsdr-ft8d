@@ -211,6 +211,13 @@ int init_ncurses(uint32_t initialFreq) {
     wattrset(header, COLOR_PAIR(2) | A_BOLD);
     mvwprintw(header, 0, 1, "%s - %s  %dHz", dec_options.rcall, dec_options.rloc, qsoFreq);
     mvwprintw(header, 0, COLS / 2 - 12, "rtlsdr FT8 %s - QSO Mode", rtlsdr_ft8d_version);
+    /* Right-aligned: usable RX audio passband width (kHz) */
+    {
+        char bwStr[24];
+        snprintf(bwStr, sizeof(bwStr), "BW %d-%d Hz",
+                 (int)RX_AUDIO_MIN, (int)RX_AUDIO_MAX);
+        mvwprintw(header, 0, COLS - (int)strlen(bwStr) - 1, "%s", bwStr);
+    }
 
     /* Content windows: normal attr + scrolling */
     wattrset(trafficW, A_NORMAL);
@@ -387,6 +394,18 @@ int exit_ft8(bool qsomode, int status) {
 
 int txStatusFlag;
 
+/* Parse a "FREQ <absHz>" reply from the transmitter (Option 3): ft8 reports the
+   actual frequency it transmitted (it may have chosen the audio slot itself when
+   the receiver sent a band base). Update qsoFreq so the header shows the true
+   transmitted frequency. Safe against short/empty reads and other reply types. */
+static void parseTxFreqReply(const FT8Msg *reply, int valread) {
+    if (valread < (int)sizeof(FT8Msg))
+        return;
+    long f = 0;
+    if (sscanf(reply->ft8Message, "FREQ %ld", &f) == 1 && f > 0)
+        qsoFreq = (uint32_t)f;
+}
+
 void *TXHandler(void *vargp) {
     int status, valread, client_fd;
     struct sockaddr_un serv_addr;
@@ -419,12 +438,14 @@ void *TXHandler(void *vargp) {
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_WAITING;
 
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_ONGOING;
             setTransmitting();
 
@@ -432,6 +453,7 @@ void *TXHandler(void *vargp) {
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_END;
             resetTransmitting();
 

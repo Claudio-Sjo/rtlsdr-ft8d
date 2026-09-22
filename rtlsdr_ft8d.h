@@ -25,16 +25,40 @@
 
 /* Single source of truth for the project version, shared by the receiver
    (rtlsdr_ft8d) and the transmitter (ft8), which both include this header. */
-#define RTLSDR_FT8D_VERSION "0.8.7"
+#define RTLSDR_FT8D_VERSION "0.8.8"
 
-/* Sampling definition for RTL devices & FT8 protocol */
+/* Sampling definition for RTL devices & FT8 protocol.
+   The receiver runs a WIDE audio passband by default: the baseband is decimated
+   to 6400 sps, giving usable audio to ~2900 Hz (close to WSJT-X's full ~3 kHz).
+   Define NARROWBAND (e.g. `make narrowband`, -DNARROWBAND) to fall back to the
+   legacy 3200 sps / ~1500 Hz chain. 2.4 MHz is divisible by both rates
+   (R = 375 wide, 750 narrow), so the RTL rate, fs/4 mixer and tuning offset are
+   unchanged; only DOWNSAMPLING (R) changes, and the compensation FIR (zCoef) is
+   reused unchanged (see wideband_plan.md / rx-characterization.md). All derived
+   sizes below recompute automatically from SIGNAL_SAMPLE_RATE. */
 #define SIGNAL_LENGHT 15
+#ifdef NARROWBAND
 #define SIGNAL_SAMPLE_RATE 3200
+#else
+#define SIGNAL_SAMPLE_RATE 6400
+#endif
 #define SAMPLING_RATE 2400000
 #define FS4_RATE (SAMPLING_RATE / 4)
 #define DOWNSAMPLING (SAMPLING_RATE / SIGNAL_SAMPLE_RATE)
 #define DEFAULT_BUF_LENGTH (4 * 16384)
 #define FIR_TAPS 56
+
+/* Usable receiver audio passband (single source of truth, shared by the
+   monitor config, the TX audio-slot limits and the UI bandwidth display).
+   Bounded above by the decimation-filter roll-off and the waterfall bin
+   ceiling (NUM_BIN * K_FSK_DEV). See rx-characterization.md.
+   Wide (default): 200..2900 Hz (ceiling 3200). Narrow: 200..1500 (ceiling 1600). */
+#define RX_AUDIO_MIN 200   // Hz, low edge of the usable passband
+#ifdef NARROWBAND
+#define RX_AUDIO_MAX 1500  // Hz, high edge (below the 1600 Hz bin ceiling)
+#else
+#define RX_AUDIO_MAX 2900  // Hz, high edge (below the 3200 Hz bin ceiling)
+#endif
 
 #define K_MIN_SCORE 10
 #define K_MAX_CANDIDATES 120
@@ -44,12 +68,14 @@
 #define K_TIME_OSR 2
 #define K_FSK_DEV 6.25f
 
-#define NUM_BIN (uint32_t)(SIGNAL_SAMPLE_RATE / (2.0f * K_FSK_DEV))                                         // 256
-#define BLOCK_SIZE (uint32_t)(SIGNAL_SAMPLE_RATE / K_FSK_DEV)                                               // 512
-#define SUB_BLOCK_SIZE (uint32_t)(BLOCK_SIZE / K_TIME_OSR)                                                  // 256
-#define NFFT (uint32_t)(BLOCK_SIZE * K_FREQ_OSR)                                                            // 1024
-#define NUM_BLOCKS (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE)  // 92 vs 92.25 DCHECK
-#define MAG_ARRAY (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)                                // 94208 vs 94464 DCHECK
+/* Derived sizes (values shown for wide default / narrow). All recompute from
+   SIGNAL_SAMPLE_RATE, so the NARROWBAND switch above resizes everything. */
+#define NUM_BIN (uint32_t)(SIGNAL_SAMPLE_RATE / (2.0f * K_FSK_DEV))                                         // 512 / 256
+#define BLOCK_SIZE (uint32_t)(SIGNAL_SAMPLE_RATE / K_FSK_DEV)                                               // 1024 / 512
+#define SUB_BLOCK_SIZE (uint32_t)(BLOCK_SIZE / K_TIME_OSR)                                                  // 512 / 256
+#define NFFT (uint32_t)(BLOCK_SIZE * K_FREQ_OSR)                                                            // 2048 / 1024
+#define NUM_BLOCKS (uint32_t)(((SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE) - NFFT + SUB_BLOCK_SIZE) / BLOCK_SIZE)  // 92 / 92
+#define MAG_ARRAY (uint32_t)(NUM_BLOCKS * K_FREQ_OSR * K_TIME_OSR * NUM_BIN)                                // 188416 / 94208
 
 /*
  * - Timing for FT8

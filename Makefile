@@ -66,9 +66,18 @@ else
 TARGETS = rtlsdr_ft8d ft8 client sk150lm_beacon calibrate
 endif
 
-.PHONY: all clean
+.PHONY: all clean narrowband
 
 all: $(TARGETS)
+
+# Narrowband build: legacy 3200 sps baseband (usable audio ~200..1500 Hz).
+# The default build is now WIDE (6400 sps, ~200..2900 Hz). Use this only to
+# fall back to the old narrow chain. See rx-characterization.md.
+# Forces a clean rebuild since the change is via a compile-time -D flag that the
+# per-object timestamps don't track. Usage: `make narrowband`.
+narrowband:
+	$(MAKE) clean
+	$(MAKE) all PI_VERSION="$(PI_VERSION) -DNARROWBAND"
 
 #%.o: %.c
 #	${CXX} ${CXXFLAGS} $(PI_VERSION) -c $< -o $@

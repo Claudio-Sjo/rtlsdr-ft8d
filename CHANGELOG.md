@@ -1,5 +1,54 @@
 ## CHANGELOG
 
+### 0.8.8
+
+- **Transmit-frequency choice moved back to the transmitter (Option 3), with
+  the actual frequency reported back to the receiver.** Now that the receiver
+  hears the full ~200..2900 Hz passband, the transmitter can pick its own slot
+  again. The single frequency the receiver sends over the socket is interpreted
+  by value: if it equals a **band base** (the official dial, e.g. 14074000 for
+  20 m) the transmitter chooses a random audio offset within its usable window
+  and transmits `dial + offset`; if it is a frequency **inside the band** (e.g.
+  a QSO reply on the peer's frequency) the transmitter uses it **verbatim**.
+  Either way `ft8` reports the actual transmitted frequency back to the receiver
+  over the existing UNIX socket (a `FREQ <absHz>` message), and the receiver
+  updates its displayed/logged frequency to match. For a CQ the receiver now
+  sends the band base (its dial); QSO replies still send the peer's exact
+  frequency. The former RX-side `cqTxFrequency()` randomizer was removed; the
+  band-base table and audio window now live in `ft8.cpp`
+  (`kBandBase`/`isBandBase`, `TX_AUDIO_MIN`/`TX_AUDIO_MAX`), matching
+  `RX_AUDIO_MIN`/`RX_AUDIO_MAX`. No socket-struct change (freq travels as text),
+  so no ABI lockstep requirement.
+- **Wide receiver passband is now the default (200..2900 Hz).** The baseband is
+  decimated to 6400 sps (was 3200), doubling the usable audio bandwidth toward
+  WSJT-X's full ~3 kHz window. 2.4 MHz / 6400 = 375 is an integer decimation
+  ratio, so the RTL rate, fs/4 mixer and dial tuning are unchanged; only the CIC
+  ratio R changes (750 -> 375). The compensation FIR (`zCoef`) is reused
+  unchanged: it is designed in normalized frequency and for these large ratios
+  the CIC droop is nearly R-independent (verified: R=375 vs R=750 taps differ by
+  1.5e-6, and the in-tree R=750 taps were reproduced exactly from the WestCoastDSP
+  `fir2` algorithm). All sample-rate/bin-count constants recompute automatically.
+- **Legacy narrow chain available via `make narrowband`** (`-DNARROWBAND`):
+  3200 sps, 200..1500 Hz, as before.
+- **Measured benefits (x86, hardware-free tests).** ~2x parallel-decode capacity
+  (45+ simultaneous signals vs ~28-29 narrow, up to the `K_MAX_MESSAGES=50`
+  report cap); no loss of weak-signal sensitivity (decode floor ~ -24 dB reported
+  SNR, uniform across the widened band); only ~18% more decode CPU per slot
+  despite 2x sample rate/FFT/bins (LDPC + Costas search dominate, not the FFT).
+- **`mag_power`/`mag_db` moved off the stack to the heap** in `ft8_subsystem`
+  (~184 KB at 6400 sps would overflow a thread stack).
+- **Shared passband constants** `RX_AUDIO_MIN`/`RX_AUDIO_MAX` (rtlsdr_ft8d.h) are
+  the single source of truth for the monitor config, the TX audio-slot limits
+  and the UI. The main-screen top border now shows the active bandwidth,
+  e.g. `BW 200-2900 Hz`.
+- **`mktestiq` test harness extended**: `-w` wideband vector, `-n N` N-signal
+  parallel-decode stress, `-s F` single-tone edge sweep, `-A`/`-N`/`-S`
+  amplitude/noise/seed controls for the SNR-floor sweep, `-r RATE` output rate.
+  A `FT8D_BENCH=N` env hook times the decode work per slot.
+- **New docs**: `rx-characterization.md` (all measured results),
+  `dsp-chain.md` (how the DSP chain and filter were computed, and the tools
+  needed to re-derive them). See also `wideband_plan.md`.
+
 ### 0.8.7
 
 - **Capped the receiver monitor passband at `f_max = 1500 Hz`** (was 3000). The

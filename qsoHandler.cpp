@@ -94,20 +94,21 @@ extern std::vector<FT8Msg> tx_queue;
  * f_max = 1500 Hz, so the TX audio window below is kept inside 200..1500 Hz so
  * that what we transmit is also what this same receiver can decode.
  */
-#define TX_AUDIO_MIN 300   // Hz, low edge of the usable audio passband for TX
-#define TX_AUDIO_MAX 1400  // Hz, high edge of the usable audio passband for TX
-                           // Kept inside the RX passband (f_min=200, f_max=1500)
-                           // so our own transmissions land where this same
-                           // transceiver can receive them, with margin below
-                           // the decimation-filter roll-off edge (~1472 Hz).
+#define TX_AUDIO_MIN (RX_AUDIO_MIN + 100)  // Hz, low edge of the TX audio window
+#define TX_AUDIO_MAX (RX_AUDIO_MAX - 100)  // Hz, high edge of the TX audio window
+                           // Derived from the RX passband (RX_AUDIO_MIN/MAX in
+                           // rtlsdr_ft8d.h) with a 100 Hz margin inside each
+                           // edge, so our own transmissions land where this
+                           // same transceiver can receive them, clear of the
+                           // decimation-filter roll-off and DC.
 
-/* Return a CQ transmit frequency: dial + a random audio offset within
-   [TX_AUDIO_MIN, TX_AUDIO_MAX]. This is a true absolute RF frequency. */
-static int32_t cqTxFrequency(void) {
-    double frac = rand() / ((double)RAND_MAX + 1.0);  // [0,1)
-    int32_t audio = TX_AUDIO_MIN + (int32_t)(frac * (TX_AUDIO_MAX - TX_AUDIO_MIN));
-    return (int32_t)rx_options.dialfreq + audio;
-}
+/* NOTE: the CQ transmit-frequency CHOICE now lives in the transmitter (ft8),
+   per Option 3: the receiver sends the band base frequency (dial) for a CQ, and
+   ft8 picks the audio offset within its usable range, transmits, and reports the
+   actual frequency back over the socket. QSO replies still send the peer's exact
+   in-band frequency, which ft8 uses verbatim. TX_AUDIO_MIN/MAX above document
+   the usable audio window shared by both ends. The former cqTxFrequency() helper
+   was removed when the choice moved to ft8. */
 
 /* Variables */
 static qsostate_t qsoState = idle;
@@ -380,7 +381,13 @@ void queryCQ(ft8slot_t theSlot) {
     static uint32_t queryRepeat = 0;
 
     if (ft8tick >= queryRepeat) {
-        int32_t cqFreq = cqTxFrequency();  // dial + audio offset +/- random spread
+        /* Option 3: for a CQ we send the BAND BASE frequency (the dial) and let
+           the transmitter choose the actual audio slot. ft8 recognises that the
+           value equals a band base, picks an offset, transmits and reports the
+           real frequency back (see TXHandler / ft8.cpp). QSO replies instead
+           send the peer's exact in-band frequency (handleTx), which ft8 uses
+           verbatim. Either way the true frequency comes back for display/log. */
+        int32_t cqFreq = (int32_t)rx_options.dialfreq;  // band base -> TX chooses slot
         sprintf(cqMessage, "FT8Tx %d CQ %s %s", cqFreq, dec_options.rcall, dec_options.rloc);
         LOG(LOG_DEBUG, "queryCq Transmitting %s\n", cqMessage);
 
