@@ -7,10 +7,15 @@ Add the ability to widen the receiver's usable audio passband from the current
 signals placed anywhere in the standard 0-3000 Hz USB audio window (not just the
 lower ~1300 Hz).
 
-Current state (v0.8.7): `mon_cfg.f_max` is capped at 1500 Hz because the whole
-DSP chain produces a 3200 sps complex baseband stream (Nyquist 1600 Hz) and the
-FT8 waterfall has `NUM_BIN = 256` bins x 6.25 Hz = 1600 Hz ceiling. The RTL is
-tuned to `realfreq + FS4_RATE` (dial at audio 0, USB convention
+Current state: DONE and shipped as the default in v0.8.8. The wide chain runs at
+6400 sps (Nyquist 3200 Hz), usable audio 200..2900 Hz, with the legacy narrow
+chain available via `make narrowband`. The notes below record the original
+analysis and the phase results.
+
+Original starting point (v0.8.7): `mon_cfg.f_max` was capped at 1500 Hz because
+the DSP chain produced a 3200 sps complex baseband stream (Nyquist 1600 Hz) and
+the FT8 waterfall had `NUM_BIN = 256` bins x 6.25 Hz = 1600 Hz ceiling. The RTL
+is tuned to `realfreq + FS4_RATE` (dial at audio 0, USB convention
 `f_RF = f_dial + f_audio`).
 
 ---
@@ -161,6 +166,39 @@ if a runtime flag is desired, reusing the proven wideband constants and FIR.
       to runtime variables, heap-allocate the buffer groups, plumb a
       `--bandwidth`/`--wide` flag through `receiver_options`, keep the narrow
       mode as default for compatibility, re-verify.
+- [x] **Phase 5 - TX-frequency authority returned to the transmitter
+      (Option 3).** Because the wide RX now hears the whole ~200..2900 Hz band,
+      the CQ frequency choice moved back into `ft8`. The receiver sends the band
+      base (dial) for a CQ or the peer's exact in-band frequency for a QSO reply;
+      `ft8` recognises a band base (`kBandBase`/`isBandBase`), picks an audio
+      offset within `TX_AUDIO_MIN..MAX` (300..2800 Hz) for a CQ, transmits, and
+      reports the actual frequency back as a `FREQ <absHz>` socket message.
+      `TXHandler` (ft8_ncurses.cpp) parses it and updates `qsoFreq`. No wire-
+      struct change (freq travels as text). Removed the RX-side `cqTxFrequency()`.
+      Builds clean: rtlsdr_ft8d on x86, ft8.cpp syntax-checked for ARM
+      (-Wall -Wextra). See CHANGELOG 0.8.8 and rx-characterization.md.
+
+---
+
+## Pending on-Pi verification (cannot be done on x86)
+
+The transmitter (`ft8`) drives the Raspberry Pi GPCLK0/DMA and only builds/runs
+on the Pi, so the following must be confirmed on the target hardware before the
+0.8.8 work is considered fully validated:
+
+1. **Wideband decode CPU budget.** Run `FT8D_BENCH=300 ./rtlsdr_ft8d -r vec.iq
+   -x ...` on the Pi 2/3 and confirm the wide (6400 sps) decode completes well
+   inside the 15 s slot. x86 showed +18% vs narrow; verify the absolute Pi time.
+2. **TX-frequency round trip (Option 3).** With `ft8` running and a live QSO/CQ:
+   - a CQ (RX sends the band base) results in `ft8` choosing an audio slot in
+     300..2800 Hz, and the RX header/`qsoFreq` updating to the reported
+     `FREQ <absHz>` value;
+   - a QSO reply (RX sends the peer's exact frequency) is transmitted verbatim
+     and reported back unchanged;
+   - confirm the transmitted RF (measured on a second receiver / WSJT-X) matches
+     what the RX displays and logs.
+3. **Self-transmit hear-back.** Confirm the wide RX actually decodes the station's
+   own transmissions across the chosen slots (TX window is inside the RX band).
 
 ---
 
