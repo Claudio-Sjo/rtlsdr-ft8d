@@ -12,15 +12,15 @@ Unless noted, tests use dial = 20 m (14074000 Hz); reported RF = dial + audio.
 
 ## 1. Receiver chain summary
 
-| Stage | Value |
-|---|---|
-| RTL input rate | 2,400,000 sps (2.4 Msps) |
+| Stage               | Value                                                        |
+| ------------------- | ------------------------------------------------------------ |
+| RTL input rate      | 2,400,000 sps (2.4 Msps)                                     |
 | fs/4 economic mixer | shifts wanted band to baseband; RTL tuned to dial + FS4_RATE |
-| CIC decimator | N = 2 stages, M = 1, ratio R = DOWNSAMPLING |
-| Compensation FIR | 57 taps (WestCoastDSP inverse-CIC design, F0 = 0.92) |
-| FT8 tone spacing | 6.25 Hz (fixed by protocol) |
-| FT8 symbol period | 0.16 s (fixed by protocol) |
-| Waterfall bins | NUM_BIN = SIGNAL_SAMPLE_RATE / 12.5 |
+| CIC decimator       | N = 2 stages, M = 1, ratio R = DOWNSAMPLING                  |
+| Compensation FIR    | 57 taps (WestCoastDSP inverse-CIC design, F0 = 0.92)         |
+| FT8 tone spacing    | 6.25 Hz (fixed by protocol)                                  |
+| FT8 symbol period   | 0.16 s (fixed by protocol)                                   |
+| Waterfall bins      | NUM_BIN = SIGNAL_SAMPLE_RATE / 12.5                          |
 
 The audio bandwidth is bounded on two fronts that must move together:
 1. the decimated sample rate (Nyquist = rate / 2), and
@@ -30,10 +30,10 @@ The audio bandwidth is bounded on two fronts that must move together:
 
 The usable passband is a compile-time choice. **Wide is the default.**
 
-| Mode | Build | Sample rate | R | NUM_BIN | NFFT | Bin ceiling | Usable audio |
-|---|---|--:|--:|--:|--:|--:|---|
-| **Wide (default)** | `make` | 6400 sps | 375 | 512 | 2048 | 3200 Hz | **200..2900 Hz** |
-| Narrow (fallback) | `make narrowband` | 3200 sps | 750 | 256 | 1024 | 1600 Hz | 200..1500 Hz |
+| Mode              | Build             | Sample rate | R   | NUM_BIN | NFFT | Bin ceiling | Usable audio  |
+| ----------------- | ----------------- | ----------: | --: | ------: | ---: | ----------: | ------------- |
+| Wide (default)    | `make`            |    6400 sps | 375 |     512 | 2048 |     3200 Hz | 200..2900 Hz  |
+| Narrow (fallback) | `make narrowband` |    3200 sps | 750 |     256 | 1024 |     1600 Hz | 200..1500 Hz  |
 
 2.4 MHz is divisible by both output rates (R = 375 and 750 are integers), so the
 RTL rate, fs/4 mixer and tuning offset are identical in both modes. Only the
@@ -42,7 +42,8 @@ both modes: it is designed in normalized frequency, and for these large ratios
 the CIC droop over the normalized passband is nearly R-independent
 (max coefficient difference R=375 vs R=750 is 1.5e-6). This was validated by
 reproducing the in-tree R=750 taps exactly from the WestCoastDSP `fir2`
-algorithm.
+algorithm. See `dsp-chain.md` for the full derivation and the tools required to
+regenerate the filter for new parameters.
 
 The current bandwidth is shown live on the main-screen top border, e.g.
 `BW 200-2900 Hz` (wide) or `BW 200-1500 Hz` (narrow).
@@ -57,11 +58,11 @@ Single-tone sweep, reported RF vs generated audio (all exact within one 6.25 Hz
 bin):
 
 | audio Hz | reported RF | audio Hz | reported RF |
-|--:|--:|--:|--:|
-| 1300 | 14075278 | 2200 | 14076178 |
-| 1500 | 14075478 | 2600 | 14076578 |
-| 1800 | 14075778 | 2800 | 14076778 |
-| 2000 | 14075978 | 3100 | 14077078 |
+| -------: | ----------: | -------: | ----------: |
+|     1300 |    14075278 |     2200 |    14076178 |
+|     1500 |    14075478 |     2600 |    14076578 |
+|     1800 |    14075778 |     2800 |    14076778 |
+|     2000 |    14075978 |     3100 |    14077078 |
 
 ## 4. Usable bandwidth / edge (measured)
 
@@ -85,10 +86,10 @@ Decode work per 15 s slot, timed in-process over many iterations (env-gated
 `FT8D_BENCH=N` hook in `decodeRecordedFile`), identical 4-signal content, only
 the DSP size differing:
 
-| Mode | sample rate | NFFT | NUM_BIN | mean decode CPU / slot | ratio |
-|---|--:|--:|--:|--:|--:|
-| Narrow | 3200 | 1024 | 256 | 26.4 ms | 1.00x |
-| Wide | 6400 | 2048 | 512 | 31.1 ms | **1.18x** |
+| Mode   | sample rate | NFFT | NUM_BIN | mean decode CPU / slot | ratio |
+| ------ | ----------: | ---: | ------: | ---------------------: | ----: |
+| Narrow |        3200 | 1024 |     256 |                26.4 ms | 1.00x |
+| Wide   |        6400 | 2048 |     512 |                31.1 ms | 1.18x |
 
 **Widening the band costs only ~18% more decode CPU, not 2x**, despite doubling
 the sample rate, FFT size and bin count. The dominant cost (LDPC belief
@@ -105,14 +106,14 @@ decode still fits comfortably inside the 15 s slot budget.
 N distinct-callsign signals spread evenly across the usable band (equal
 amplitude, so per-signal SNR falls as N rises). Decoded-count vs N:
 
-| N | narrow decoded (spacing) | wide decoded (spacing) |
-|--:|:--|:--|
-| 5..25 | all | all |
-| 30 | 29 (41 Hz) | 30 (90 Hz) |
-| 40 | 26 (31 Hz) | 40 (67 Hz) |
-| 45 | - | 45 (59 Hz) |
-| 50 | 2 (24 Hz, jammed) | 50 (53 Hz) |
-| 55/60 | - | 50 (report cap) |
+| N     | narrow decoded (spacing) | wide decoded (spacing) |
+| ----- | ------------------------ | ---------------------- |
+| 5..25 | all                      | all                    |
+| 30    | 29 (41 Hz)               | 30 (90 Hz)             |
+| 40    | 26 (31 Hz)               | 40 (67 Hz)             |
+| 45    | -                        | 45 (59 Hz)             |
+| 50    | 2 (24 Hz, jammed)        | 50 (53 Hz)             |
+| 55/60 | -                        | 50 (report cap)        |
 
 - The controlling variable is per-signal spacing vs the ~50 Hz FT8 signal width;
   once packed closer than ~50 Hz, signals overlap and stop decoding.
@@ -132,12 +133,12 @@ Single signal, fixed amplitude, noise level raised; decode success measured over
 20 independent noise seeds per level:
 
 | noise stddev | decode success | reported SNR |
-|--:|:--|:--:|
-| <= 0.32 | 20/20 (100%) | -24 dB |
-| 0.34 | 19/20 (95%) | -24 dB |
-| 0.36 | 15/20 (75%) | -24 dB |
-| 0.40 | 4/20 (20%) | -24 dB |
-| 0.45 | 0/20 | - |
+| ------------ | -------------- | ------------ |
+| <= 0.32      | 20/20 (100%)   | -24 dB       |
+| 0.34         | 19/20 (95%)    | -24 dB       |
+| 0.36         | 15/20 (75%)    | -24 dB       |
+| 0.40         | 4/20 (20%)     | -24 dB       |
+| 0.45         | 0/20           | -            |
 
 - **Decode floor ~ -24 dB reported SNR.** 100% reliable to -24 dB, then a
   probabilistic S-curve cliff (typical of LDPC forward error correction near
@@ -159,16 +160,16 @@ Single signal, fixed amplitude, noise level raised; decode success measured over
 Hardware-free FT8 test-vector generator. Writes an interleaved float32 `.iq`
 file (I = cos, Q = -sin, matching the receiver's readRawIQfile convention).
 
-| Option | Meaning |
-|---|---|
-| (default) | 4-signal band vector 400/800/1200/1500 Hz |
-| `-w` | wideband vector spread across 0..3000 Hz |
-| `-n N` | N distinct signals spread evenly across the band (parallel test) |
-| `-s F` | single signal at audio F Hz (edge sweep) |
-| `-A amp` | per-signal amplitude for `-s` (default 0.7) |
-| `-N amp` | WGN stddev per I/Q sample (default 0.02); probe the SNR floor |
-| `-S seed` | RNG seed (default 12345); vary for noise statistics |
-| `-r RATE` | output sample rate (3200 narrow, 6400 wide) |
+| Option    | Meaning                                                        |
+| --------- | -------------------------------------------------------------- |
+| (default) | 4-signal band vector 400/800/1200/1500 Hz                      |
+| `-w`      | wideband vector spread across 0..3000 Hz                       |
+| `-n N`    | N distinct signals spread evenly across the band (parallel)    |
+| `-s F`    | single signal at audio F Hz (edge sweep)                       |
+| `-A amp`  | per-signal amplitude for `-s` (default 0.7)                    |
+| `-N amp`  | WGN stddev per I/Q sample (default 0.02); probe the SNR floor  |
+| `-S seed` | RNG seed (default 12345); vary for noise statistics            |
+| `-r RATE` | output sample rate (3200 narrow, 6400 wide)                    |
 
 Decode-side CPU benchmark: `FT8D_BENCH=N ./rtlsdr_ft8d -r vec.iq -x ...` re-runs
 the decode N times and prints mean wall/CPU ms.

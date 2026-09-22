@@ -137,9 +137,13 @@ static void rtlsdr_callback(unsigned char *samples, uint32_t samples_count, void
     /* FIR compensation filter coefs
        Using : Octave/MATLAB code for generating compensation FIR coefficients
        URL : https://github.com/WestCoastDSP/CIC_Octave_Matlab
+       See dsp-chain.md for how these were derived and re-verified.
      */
 
-    /* Coefs with R=750, M=1, N=2, F0=0.92, L=54 */
+    /* Coefs with R=750, M=1, N=2, F0=0.92, L=56 (57 taps). These are reused
+       unchanged for the wide default (R=375): because the compensator is
+       designed in normalized frequency, the CIC droop is nearly R-independent
+       for large R (R=375 vs R=750 taps differ by <2e-6). See dsp-chain.md. */
     const static float zCoef[FIR_TAPS + 1] = {
         -0.0025719973, 0.0010118403, 0.0009110571, -0.0034940765,
         0.0069713409, -0.0114242790, 0.0167023466, -0.0223683056,

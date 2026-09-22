@@ -86,23 +86,23 @@ Every sizing constant is a **compile-time `#define`** that statically sizes
 global/stack buffers. A runtime parameter cannot just flip a value; the buffers
 must become dynamically allocated.
 
-| Item | Location | Current | Change for 6400 sps |
-|---|---|---|---|
-| `SAMPLING_RATE` | rtlsdr_ft8d.h | 2400000 | keep (2.4M / 6400 = 375) |
-| `DOWNSAMPLING` / R | rtlsdr_ft8d.h | 750 | 375 (runtime var) |
-| `SIGNAL_SAMPLE_RATE` | rtlsdr_ft8d.h | 3200 | 6400 (runtime var) |
-| CIC gain scale | rtlsdr_ft8d.cpp ~245 | `32768 * 750` | track R |
-| `zCoef` (FIR) | rtlsdr_ft8d.cpp ~143 | R=750 const array | **reuse unchanged** (R=375 taps identical) |
-| `NUM_BIN` | rtlsdr_ft8d.h | 256 | 512 (runtime) |
-| `BLOCK_SIZE`/`SUB`/`NFFT` | rtlsdr_ft8d.h | 512/256/1024 | 1024/512/2048 (runtime) |
-| `NUM_BLOCKS`/`MAG_ARRAY` | rtlsdr_ft8d.h | 92/94208 | ~92/188416 (runtime) |
-| `iSamples`/`qSamples` | rtlsdr_ft8d.h ~117 | static `[2][96000]` | heap alloc |
-| `mag_power` | rtlsdr_ft8d.cpp ~2183 | **~92 KB on stack** | **heap (mandatory)** |
-| `mag_db` | rtlsdr_ft8d.cpp ~2192 | `[NFFT]` stack | heap |
-| FFTW buffers / `hann` | rtlsdr_ft8d.cpp ~450 | `NFFT` | already runtime alloc (OK) |
-| `mon_cfg.f_max`/`.sample_rate` | rtlsdr_ft8d.cpp ~2247 | 1500/3200 | runtime, keep `max_bin <= NUM_BIN` |
-| ft8_lib decode/monitor | libft8/ | general | **no change** |
-| `noiseFloorPower` scratch | rtlsdr_ft8d.cpp ~1130 | `static float[8192]` | verify still big enough |
+| Item                            | Location             | Current             | Change for 6400 sps                        |
+| ------------------------------- | -------------------- | ------------------- | ------------------------------------------ |
+| `SAMPLING_RATE`                 | rtlsdr_ft8d.h        | 2400000             | keep (2.4M / 6400 = 375)                   |
+| `DOWNSAMPLING` / R              | rtlsdr_ft8d.h        | 750                 | 375 (runtime var)                          |
+| `SIGNAL_SAMPLE_RATE`            | rtlsdr_ft8d.h        | 3200                | 6400 (runtime var)                         |
+| CIC gain scale                  | rtlsdr_ft8d.cpp ~245 | `32768 * 750`       | track R                                    |
+| `zCoef` (FIR)                   | rtlsdr_ft8d.cpp ~143 | R=750 const array   | reuse unchanged (R=375 taps identical)     |
+| `NUM_BIN`                       | rtlsdr_ft8d.h        | 256                 | 512 (runtime)                              |
+| `BLOCK_SIZE`/`SUB`/`NFFT`       | rtlsdr_ft8d.h        | 512/256/1024        | 1024/512/2048 (runtime)                    |
+| `NUM_BLOCKS`/`MAG_ARRAY`        | rtlsdr_ft8d.h        | 92/94208            | ~92/188416 (runtime)                       |
+| `iSamples`/`qSamples`           | rtlsdr_ft8d.h ~117   | static `[2][96000]` | heap alloc                                 |
+| `mag_power`                     | rtlsdr_ft8d.cpp ~2183| ~92 KB on stack     | heap (mandatory)                           |
+| `mag_db`                        | rtlsdr_ft8d.cpp ~2192| `[NFFT]` stack      | heap                                       |
+| FFTW buffers / `hann`           | rtlsdr_ft8d.cpp ~450 | `NFFT`              | already runtime alloc (OK)                 |
+| `mon_cfg.f_max`/`.sample_rate`  | rtlsdr_ft8d.cpp ~2247| 1500/3200           | runtime, keep `max_bin <= NUM_BIN`         |
+| ft8_lib decode/monitor          | libft8/              | general             | no change                                  |
+| `noiseFloorPower` scratch       | rtlsdr_ft8d.cpp ~1130| `static float[8192]`| verify still big enough                    |
 
 ---
 
@@ -171,12 +171,12 @@ if a runtime flag is desired, reusing the proven wideband constants and FIR.
 Single signal (CQ K1JT FN20), signal amp 0.05, noise raised, 20 seeds/level:
 
 | noise stddev | decode success | reported SNR |
-|--:|:--|:--:|
-| <= 0.32 | 20/20 (100%) | -24 dB |
-| 0.34 | 19/20 (95%) | -24 dB |
-| 0.36 | 15/20 (75%) | -24 dB |
-| 0.40 | 4/20 (20%) | -24 dB |
-| 0.45 | 0/20 | - |
+| ------------ | -------------- | ------------ |
+| <= 0.32      | 20/20 (100%)   | -24 dB       |
+| 0.34         | 19/20 (95%)    | -24 dB       |
+| 0.36         | 15/20 (75%)    | -24 dB       |
+| 0.40         | 4/20 (20%)     | -24 dB       |
+| 0.45         | 0/20           | -            |
 
 Findings:
 - **Decode floor ~ -24 dB reported SNR.** 100% reliable to -24 dB, then a
@@ -199,15 +199,15 @@ Findings:
 across the usable band (edge follows -r rate). Equal amplitude, so per-signal
 SNR falls as N rises (shared power budget). Decoded-count comparison:
 
-| N | narrow decoded (spacing) | wideband decoded (spacing) |
-|--:|:--|:--|
-| 5..25 | all | all |
-| 28 | 28 (44 Hz) | - |
-| 30 | 29 (41 Hz) | 30 (90 Hz) |
-| 40 | 26 (31 Hz) | 40 (67 Hz) |
-| 45 | - | 45 (59 Hz) |
-| 50 | 2 (24 Hz, jammed) | 50 (53 Hz) |
-| 55/60 | - | 50 (cap) |
+| N     | narrow decoded (spacing) | wideband decoded (spacing) |
+| ----- | ------------------------ | -------------------------- |
+| 5..25 | all                      | all                        |
+| 28    | 28 (44 Hz)               | -                          |
+| 30    | 29 (41 Hz)               | 30 (90 Hz)                 |
+| 40    | 26 (31 Hz)               | 40 (67 Hz)                 |
+| 45    | -                        | 45 (59 Hz)                 |
+| 50    | 2 (24 Hz, jammed)        | 50 (53 Hz)                 |
+| 55/60 | -                        | 50 (cap)                   |
 
 Findings:
 - Controlling variable is per-signal spacing vs the ~50 Hz FT8 signal width.
@@ -230,17 +230,17 @@ the tool can emit 6400 sps vectors too. Default and self-test vectors unchanged
 
 Single-tone sweep (CQ K1JT FN20, dial 20 m = 14074000), current 3200 sps chain:
 
-| audio Hz | decoded | reported RF | SNR |
-|---:|:--:|---:|---:|
-| 1300 | YES | 14075278 | +18 |
-| 1350 | YES | 14075328 | +17 |
-| 1400 | YES | 14075378 | +18 |
-| 1450 | YES | 14075428 | +17 |
-| 1472 | YES | 14075450 | +18 |
-| 1500 | YES | 14075478 | +18 |
-| 1550 | YES | 14075528 | +19 |
-| 1600 | no  | -          | -  |
-| 1650..2000 | no | - | - |
+| audio Hz   | decoded | reported RF | SNR |
+| ---------- | ------- | ----------- | --- |
+| 1300       | YES     | 14075278    | +18 |
+| 1350       | YES     | 14075328    | +17 |
+| 1400       | YES     | 14075378    | +18 |
+| 1450       | YES     | 14075428    | +17 |
+| 1472       | YES     | 14075450    | +18 |
+| 1500       | YES     | 14075478    | +18 |
+| 1550       | YES     | 14075528    | +19 |
+| 1600       | no      | -           | -   |
+| 1650..2000 | no      | -           | -   |
 
 **Findings:**
 - Hard cutoff at exactly **1600 Hz** = `NUM_BIN(256) x 6.25 Hz`. This is the FFT
