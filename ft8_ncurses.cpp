@@ -394,6 +394,18 @@ int exit_ft8(bool qsomode, int status) {
 
 int txStatusFlag;
 
+/* Parse a "FREQ <absHz>" reply from the transmitter (Option 3): ft8 reports the
+   actual frequency it transmitted (it may have chosen the audio slot itself when
+   the receiver sent a band base). Update qsoFreq so the header shows the true
+   transmitted frequency. Safe against short/empty reads and other reply types. */
+static void parseTxFreqReply(const FT8Msg *reply, int valread) {
+    if (valread < (int)sizeof(FT8Msg))
+        return;
+    long f = 0;
+    if (sscanf(reply->ft8Message, "FREQ %ld", &f) == 1 && f > 0)
+        qsoFreq = (uint32_t)f;
+}
+
 void *TXHandler(void *vargp) {
     int status, valread, client_fd;
     struct sockaddr_un serv_addr;
@@ -426,12 +438,14 @@ void *TXHandler(void *vargp) {
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_WAITING;
 
             valread = read(client_fd, &Rxletter, sizeof(Rxletter));
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_ONGOING;
             setTransmitting();
 
@@ -439,6 +453,7 @@ void *TXHandler(void *vargp) {
             if (!valread) {
                 perror("Error, nothing read");
             }
+            parseTxFreqReply(&Rxletter, valread);
             txStatusFlag = TX_END;
             resetTransmitting();
 

@@ -64,6 +64,16 @@ bin):
 |     1800 |    14075778 |     2800 |    14076778 |
 |     2000 |    14075978 |     3100 |    14077078 |
 
+### Transmit-frequency authority
+
+The transmitter (`ft8`) chooses the audio slot for a CQ and reports the actual
+frequency back to the receiver over the socket (see CHANGELOG 0.8.8). The
+receiver sends the band base (dial) for a CQ, or the peer's exact in-band
+frequency for a QSO reply; `ft8` transmits and returns a `FREQ <absHz>` message,
+which the receiver displays/logs. The TX audio window (`TX_AUDIO_MIN`/`MAX` in
+`ft8.cpp`, 300..2800 Hz) is kept inside the RX passband so the transceiver hears
+its own transmissions.
+
 ## 4. Usable bandwidth / edge (measured)
 
 Single tone swept in frequency; the point where decoding stops is the usable

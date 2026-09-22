@@ -2,6 +2,23 @@
 
 ### 0.8.8
 
+- **Transmit-frequency choice moved back to the transmitter (Option 3), with
+  the actual frequency reported back to the receiver.** Now that the receiver
+  hears the full ~200..2900 Hz passband, the transmitter can pick its own slot
+  again. The single frequency the receiver sends over the socket is interpreted
+  by value: if it equals a **band base** (the official dial, e.g. 14074000 for
+  20 m) the transmitter chooses a random audio offset within its usable window
+  and transmits `dial + offset`; if it is a frequency **inside the band** (e.g.
+  a QSO reply on the peer's frequency) the transmitter uses it **verbatim**.
+  Either way `ft8` reports the actual transmitted frequency back to the receiver
+  over the existing UNIX socket (a `FREQ <absHz>` message), and the receiver
+  updates its displayed/logged frequency to match. For a CQ the receiver now
+  sends the band base (its dial); QSO replies still send the peer's exact
+  frequency. The former RX-side `cqTxFrequency()` randomizer was removed; the
+  band-base table and audio window now live in `ft8.cpp`
+  (`kBandBase`/`isBandBase`, `TX_AUDIO_MIN`/`TX_AUDIO_MAX`), matching
+  `RX_AUDIO_MIN`/`RX_AUDIO_MAX`. No socket-struct change (freq travels as text),
+  so no ABI lockstep requirement.
 - **Wide receiver passband is now the default (200..2900 Hz).** The baseband is
   decimated to 6400 sps (was 3200), doubling the usable audio bandwidth toward
   WSJT-X's full ~3 kHz window. 2.4 MHz / 6400 = 375 is an integer decimation
