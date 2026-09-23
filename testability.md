@@ -110,11 +110,31 @@ wrong-rate signals on the wide (6400 sps) default build -- the self-test was
 FAILING. Fixed to derive from `SIGNAL_SAMPLE_RATE` / `K_FSK_DEV`; self-test now
 passes on both narrow and wide.
 
-- **Phase 3 -- Auto-reply QSO loop.**
-  On a decoded CQ, the fake constructs a valid reply (`<mycall> <peercall>
-  <grid>`), encodes it, and emits it on the next slot at a chosen audio slot,
-  driving the RX QSO state machine through reply -> RR73 -> 73. Needs the fake
-  to carry a small station identity and minimal QSO logic.
+**Phase 3 -- auto-reply QSO loop -- DONE**
+The fake gained a fixed station identity (`F1ABC` / `JN99`) and a responder
+(`fakePeerReply`) that answers the receiver's QSO: CQ -> answer with grid;
+signal report -> R-report; RR73 -> 73; 73 -> done. Two pending slots (own echo +
+peer reply); the peer reply is rendered one slot LATER than the RX's own
+transmission, so it lands in the opposite slot like a real alternating QSO.
+Verified live (driven via tmux with AUTOCQ + AUTOREPLY + AUTOQSO enabled): the
+receiver runs a complete exchange end to end -- `CQ SA0PRF JO99` -> peer
+`SA0PRF F1ABC JN99` -> `F1ABC SA0PRF +17` -> peer `SA0PRF F1ABC R-10` ->
+`F1ABC SA0PRF RR73` -> peer `SA0PRF F1ABC 73` -> new CQ -- repeating.
+
+Bug found and fixed via this harness (in the RX, `qsoHandler.cpp` addQso update
+branch): on receiving a signal report while already in `replySig`, the state
+machine always re-set `replySig` (the advance-to-`replyRR73` logic was commented
+out), so a QSO initiator would resend its report forever and never complete.
+Fixed: `if (qsoState == replySig) qsoState = replyRR73; else qsoState =
+replySig;`. This is a pre-existing state-machine bug, unrelated to the fake
+transmitter, that the closed-loop harness surfaced.
+
+Minor open item (logging policy, not correctness): when the receiver is the
+initiator and ends by sending RR73 then receiving the peer's `73`, it resets
+without writing an ADI record; the QSO itself completes correctly on the air.
+
+All three phases build clean (x86 `-Wall -Wextra`; `fakeTx.cpp` and `ft8.cpp`
+ARM syntax-checked) and the decoder self-test passes on the wide default.
 
 Each phase is independently useful and independently testable.
 

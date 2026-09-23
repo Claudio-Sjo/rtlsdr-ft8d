@@ -644,10 +644,16 @@ void addQso(struct plain_message *newQso) {
                 break;
             case sigMsg:
                 LOG(LOG_DEBUG, "addQso received Sig\n");
-                // if (qsoState == replyLoc)  // We have sent LOC, we reply SIG
+                /* A SIG while we are still exchanging locators means "here is
+                   your report" -> we reply with our report (replySig). A SIG
+                   once we have ALREADY sent our report (state replySig) is the
+                   peer's R-report acknowledgement -> advance to RR73. Without
+                   this, an initiator stuck in replySig would resend its report
+                   forever and the QSO could never complete. */
+                if (qsoState == replySig)
+                    qsoState = replyRR73;
+                else
                     qsoState = replySig;
-                // else  // Otherwise we reply RR73
-                //    qsoState = replyRR73;
                 break;
             case RR73Msg:  // If we receive RR73 we reply 73 and close the QSO
                 LOG(LOG_DEBUG, "addQso received RR73\n");

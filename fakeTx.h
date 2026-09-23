@@ -34,12 +34,15 @@ int fakeTxStart(unsigned int dialHz);
    Idempotent; unlinks the socket. Call at receiver shutdown. */
 void fakeTxStop(void);
 
-/* Pending-transmission hand-off (Phase 2): when the fake transmitter accepts a
-   SEND_F8_REQ it deposits the FT8 message text and its audio offset (Hz,
-   relative to the dial) here. The receiver's per-slot generator pops it and
-   renders it into the decode buffer, so the RX "hears" its own transmission.
+/* Pending-transmission hand-off (Phase 2/3): when the fake transmitter accepts a
+   SEND_F8_REQ it deposits (a) the receiver's OWN transmission and (b), in QSO
+   mode, a synthetic PEER reply addressed back to the receiver. The receiver's
+   per-slot generator pops both and renders them into the decode buffer, so the
+   RX both hears its own transmission and receives a reply that drives its QSO
+   state machine.
 
-   fakeTxPopPending() returns true and fills msg/audioHz if a transmission is
-   pending, clearing it (one-shot per slot). Thread-safe. `msgCap` is the size
-   of the caller's msg buffer. */
-bool fakeTxPopPending(char *msg, int msgCap, float *audioHz);
+   fakeTxPopOwn() / fakeTxPopPeer() each return true and fill msg/audioHz if that
+   transmission is pending, clearing it (one-shot per slot). Thread-safe.
+   `msgCap` is the size of the caller's msg buffer. */
+bool fakeTxPopOwn(char *msg, int msgCap, float *audioHz);
+bool fakeTxPopPeer(char *msg, int msgCap, float *audioHz);

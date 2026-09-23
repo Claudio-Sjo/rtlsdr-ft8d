@@ -77,34 +77,95 @@ static unsigned int fakeDialHz = 0; /* RX dial, for absFreq -> audio offset */
 static int fakeHandlerCount = 0;
 static pthread_mutex_t fakeHandlerLock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Pending-transmission hand-off to the receiver's per-slot IQ generator. */
-static struct {
+/* Pending-transmission hand-off to the receiver's per-slot IQ generator.
+   Two slots: the receiver's own transmission (echo) and a synthetic peer reply
+   (QSO mode). Each is one-shot per slot. */
+struct pendingSig {
     char msg[MAXMSGSIZE];
     float audioHz;
     bool valid;
-} fakePending;
+};
+static struct pendingSig fakeOwn;
+static struct pendingSig fakePeer;
 static pthread_mutex_t fakePendingLock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Deposit a transmission for the RX to render next slot (Phase 2). */
-static void fakeTxDeposit(const char *msg, float audioHz) {
+static void depositSig(struct pendingSig *slot, const char *msg, float audioHz) {
     pthread_mutex_lock(&fakePendingLock);
-    snprintf(fakePending.msg, sizeof(fakePending.msg), "%s", msg);
-    fakePending.audioHz = audioHz;
-    fakePending.valid = true;
+    snprintf(slot->msg, sizeof(slot->msg), "%s", msg);
+    slot->audioHz = audioHz;
+    slot->valid = true;
     pthread_mutex_unlock(&fakePendingLock);
 }
 
-bool fakeTxPopPending(char *msg, int msgCap, float *audioHz) {
+static bool popSig(struct pendingSig *slot, char *msg, int msgCap, float *audioHz) {
     bool had = false;
     pthread_mutex_lock(&fakePendingLock);
-    if (fakePending.valid) {
-        snprintf(msg, msgCap, "%s", fakePending.msg);
-        *audioHz = fakePending.audioHz;
-        fakePending.valid = false;
+    if (slot->valid) {
+        snprintf(msg, msgCap, "%s", slot->msg);
+        *audioHz = slot->audioHz;
+        slot->valid = false;
         had = true;
     }
     pthread_mutex_unlock(&fakePendingLock);
     return had;
+}
+
+bool fakeTxPopOwn(char *msg, int msgCap, float *audioHz) {
+    return popSig(&fakeOwn, msg, msgCap, audioHz);
+}
+
+bool fakeTxPopPeer(char *msg, int msgCap, float *audioHz) {
+    return popSig(&fakePeer, msg, msgCap, audioHz);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Fake peer station (Phase 3): a fixed-identity responder that answers the
+ * receiver's QSO so the RX state machine can be driven end to end. Standard
+ * callsign/grid so the messages encode without a hash-table entry. */
+#define FAKE_PEER_CALL "F1ABC"
+#define FAKE_PEER_GRID "JN99"
+#define FAKE_PEER_RREPORT "R-10"
+#define FAKE_PEER_AUDIO_DELTA 250.0f /* peer sits this far from the RX's own slot */
+
+/* Given the FT8 message the receiver just transmitted (tok0 tok1 tok2...),
+ * produce the peer's next reply addressed to the RX, or return false if no
+ * reply is warranted. rxAudio is the RX's own audio slot; the peer reply is
+ * placed a little away from it (kept inside the passband).
+ *
+ * Sequencing (RX is the CQ caller):
+ *   RX "CQ <rxcall> <grid>"      -> peer "<rxcall> F1ABC JN99"   (grid/answer)
+ *   RX "F1ABC <rxcall> <report>" -> peer "<rxcall> F1ABC R-10"   (signal)
+ *   RX "F1ABC <rxcall> RR73"     -> peer "<rxcall> F1ABC 73"     (finish)
+ *   RX "F1ABC <rxcall> 73"       -> (QSO complete, no reply)
+ */
+static bool fakePeerReply(char *tok0, char *tok1, char *tok2,
+                          char *out, int outCap) {
+    if (!tok0)
+        return false;
+
+    if (!strcmp(tok0, "CQ") && tok1) {
+        /* tok1 = rxcall (tok2 = rxgrid, ignored). Answer with our grid. */
+        snprintf(out, outCap, "%s %s %s", tok1, FAKE_PEER_CALL, FAKE_PEER_GRID);
+        return true;
+    }
+
+    /* Directed message: tok0 = dest, tok1 = src(=rxcall), tok2 = message. Only
+       reply if it is addressed to us (the peer). */
+    if (!strcmp(tok0, FAKE_PEER_CALL) && tok1 && tok2) {
+        const char *rxcall = tok1;
+        if (!strcmp(tok2, "RR73")) {
+            snprintf(out, outCap, "%s %s 73", rxcall, FAKE_PEER_CALL);
+            return true;
+        }
+        if (!strcmp(tok2, "73")) {
+            return false; /* QSO complete */
+        }
+        /* A signal report or grid from the RX -> reply with R-report. */
+        snprintf(out, outCap, "%s %s %s", rxcall, FAKE_PEER_CALL, FAKE_PEER_RREPORT);
+        return true;
+    }
+
+    return false;
 }
 
 static void fakeLog(const char *fmt, ...) {
@@ -153,6 +214,9 @@ static void *fakeHandler(void *argp) {
                 wordexp_t params;
                 long absFreq = 0;
                 char message[MAXMSGSIZE] = {0};
+                /* Copies of the message tokens (index 2,3,4) for the QSO
+                   responder, captured before wordfree. */
+                char tk0[16] = {0}, tk1[16] = {0}, tk2[16] = {0};
 
                 if (wordexp(Rxletter.ft8Message, &params, 0) == 0) {
                     /* Token 0 is "FT8Tx"; token 1 is the frequency/band; the
@@ -183,6 +247,12 @@ static void *fakeHandler(void *argp) {
                         strncat(message, params.we_wordv[i], sizeof(message) - strlen(message) - 1);
                     }
 
+                    /* Capture the first three message tokens for the QSO
+                       responder before freeing (tok0 tok1 tok2). */
+                    if (params.we_wordc > 2) snprintf(tk0, sizeof(tk0), "%s", params.we_wordv[2]);
+                    if (params.we_wordc > 3) snprintf(tk1, sizeof(tk1), "%s", params.we_wordv[3]);
+                    if (params.we_wordc > 4) snprintf(tk2, sizeof(tk2), "%s", params.we_wordv[4]);
+
                     /* Option 3: band base -> choose an audio slot; otherwise use
                        the requested frequency verbatim. */
                     if (fakeIsBandBase(parsed)) {
@@ -208,14 +278,34 @@ static void *fakeHandler(void *argp) {
                 snprintf(Txletter.ft8Message, MAXMSGSIZE, "FREQ %ld", absFreq);
                 send(fd, &Txletter, sizeof(Txletter), 0);
 
-                /* Phase 2: hand the transmission to the receiver's per-slot IQ
+                /* Phase 2/3: hand the transmission to the receiver's per-slot IQ
                    generator. The RX renders at an audio offset from its dial:
-                   audio = absFreq - dial. Only deposit if we have a message and
-                   the offset lands in a sane audio range. */
+                   audio = absFreq - dial. Deposit the RX's own echo, and -- in
+                   QSO mode -- a synthetic peer reply addressed back to the RX so
+                   its state machine advances. */
                 if (message[0] && fakeDialHz > 0) {
-                    float audio = (float)(absFreq - (long)fakeDialHz);
-                    if (audio > 0.0f && audio < (float)SIGNAL_SAMPLE_RATE / 2.0f)
-                        fakeTxDeposit(message, audio);
+                    float ownAudio = (float)(absFreq - (long)fakeDialHz);
+                    if (ownAudio > 0.0f && ownAudio < (float)SIGNAL_SAMPLE_RATE / 2.0f) {
+                        depositSig(&fakeOwn, message, ownAudio);
+
+                        /* Compute the peer reply from the RX's message tokens. */
+                        char peerMsg[MAXMSGSIZE];
+                        if (fakePeerReply(tk0[0] ? tk0 : NULL,
+                                          tk1[0] ? tk1 : NULL,
+                                          tk2[0] ? tk2 : NULL,
+                                          peerMsg, sizeof(peerMsg))) {
+                            /* Place the peer a little away from the RX's own
+                               slot, clamped inside the usable passband. */
+                            float peerAudio = ownAudio + FAKE_PEER_AUDIO_DELTA;
+                            float nyq = (float)SIGNAL_SAMPLE_RATE / 2.0f;
+                            if (peerAudio >= nyq - 100.0f)
+                                peerAudio = ownAudio - FAKE_PEER_AUDIO_DELTA;
+                            if (peerAudio < 100.0f)
+                                peerAudio = 100.0f;
+                            depositSig(&fakePeer, peerMsg, peerAudio);
+                            fakeLog("  peer reply: \"%s\" @ %.0f Hz\n", peerMsg, peerAudio);
+                        }
+                    }
                 }
 
                 fakeLog("SEND_F8_REQ freq=%ld msg=\"%s\"\n", absFreq, message);
