@@ -32,16 +32,21 @@ parses requests the same way `ft8` does. Instead of driving GPCLK/DMA it:
    `ft8` `parse_commandline`);
 2. applies the Option 3 rule (band base -> choose audio slot; in-band -> use
    verbatim) and logs to a file what it "transmitted";
-3. waits for the real FT8 slot boundary (real-time preserved);
-4. synthesizes the transmitted message into an `.iq` file (reusing the
-   `mktestiq` FT8 encoder + generator at the current SIGNAL_SAMPLE_RATE);
-5. reports the actual frequency back over the socket (`FREQ <absHz>`);
-6. for a CQ, on the NEXT slot also synthesizes a plausible reply to that CQ, so a
+3. reports the actual frequency back over the socket (`FREQ <absHz>`);
+4. hands the parsed message (+ chosen audio offset) to the receiver's per-slot
+   IQ generator, which renders it into the decode buffer at the real slot
+   boundary (real-time preserved);
+5. for a CQ, on the NEXT slot also renders a plausible reply to that CQ, so a
    full QSO exchange can be driven.
 
-The receiver reads that `.iq` file as its per-slot input, decodes it, and its
-QSO state machine reacts -- producing the next TX request. A closed, self-driving
-loop with real slot timing.
+The receiver decodes the rendered slot and its QSO state machine reacts --
+producing the next TX request. A closed, self-driving loop with real slot timing.
+
+NOTE (revised after code review): an earlier draft wrote/read a shared `.iq`
+file between transmitter and receiver. That is unnecessary -- the receiver
+already synthesizes IQ in-process via `genFT8Signal` in its per-slot rxtest path.
+The fake instead hands off the message in memory (see "Detailed work plan"
+below). No file, no file-handoff race.
 
 ### Design decisions (agreed)
 
@@ -54,10 +59,11 @@ loop with real slot timing.
   `KBDHandler` threads), guarded behind a test flag/build so it never ships in
   the production path. This avoids fork/exec lifecycle management and lets it
   share the process's slot clock and buffers directly.
-- **IQ file is written by the (fake) transmitter and read by the receiver;**
-  both close it between slots so the next slot's write can overwrite it. The
-  handoff MUST be race-safe (see risks) -- design as atomic rename-into-place
-  plus a per-slot ready token, not a bare shared file.
+- **IQ hand-off is in-memory, not a file.** The receiver already renders IQ into
+  its decode buffer per slot (`genFT8Signal` in `fillRxTestBuffer`); the fake
+  deposits the parsed message into a mutex-guarded in-process structure that the
+  slot loop consumes. (An earlier `.iq`-file design was dropped -- see the
+  "Detailed work plan" and "Superseded risks" below.)
 
 ### Integration points (from the current code)
 
@@ -127,5 +133,97 @@ This harness closes most of the "Pending on-Pi verification" items in
 `wideband_plan.md` (socket round trip, Option 3 behaviour, QSO loop) on x86. It
 does NOT replace the on-Pi checks for real GPCLK/DMA RF output and the actual Pi
 CPU budget -- those still require the target hardware.
+
+---
+
+## Detailed work plan (revised after code review)
+
+Code review of the receiver (rtlsdr_ft8d.cpp) changed the architecture in one
+important way: **no `.iq` file is needed.** The receiver already synthesizes IQ
+directly into its decode buffer and already runs a per-slot synthetic path.
+
+Grounding facts (verified in code):
+- `fillRxTestBuffer(idx)` (rtlsdr_ft8d.cpp ~285) already renders FT8 messages
+  straight into `rx_state.iSamples[idx]/qSamples[idx]` via `genFT8Signal(iS, qS,
+  message, audioHz, amp, noise)` -- the encoder+modulator the fake needs already
+  lives in the RX. No dependency on mktestiq or on any file.
+- The main slot loop (rtlsdr_ft8d.cpp ~2039-2069) already has an `rx_options.
+  rxtest` branch that, once per real 15 s slot, calls `fillRxTestBuffer`, flips
+  the buffer, and signals the decoder -- honouring real slot timing. This is the
+  exact injection point.
+- `genFT8Signal` sums into the buffer, so several messages (own TX + a synthetic
+  peer reply) can coexist in one slot.
+
+**Revised architecture:** the fake transmitter is a single async **socket-server
+thread** (mirrors the other RX threads: decoder/CQHandler/TXHandler/KBDHandler).
+The IQ generation stays on the main slot-loop thread where it already is. The two
+communicate through a small mutex-guarded, in-memory structure -- NOT a file.
+This removes the earlier file-handoff race and file-phase risks entirely.
+
+### Data flow (per slot)
+
+```
+qsoHandler queueTx -> TXHandler --socket--> fakeTx thread
+     (FT8Tx <freq> <dest> <src> <extra>)         |
+                                                  | parse (like ft8),
+                                                  | apply Option 3 (band base ->
+                                                  |   choose audio; else verbatim),
+                                                  | send FREQ <abs> reply back,
+                                                  | log the "transmission",
+                                                  | deposit {message,audioHz} into
+                                                  |   a mutex-guarded pendingTx slot
+                                                  v
+main slot loop (rxtest path) -> fillRxTestBuffer():
+      render own pendingTx message(s) via genFT8Signal at their audio offset,
+      (Phase 3) also render a synthetic peer reply,
+      flip buffer + signal decoder  -> decode -> UI/QSO/log
+```
+
+### Tasks by phase
+
+**Phase 1 -- socket-compatible fake transmitter thread (no IQ yet) -- DONE**
+Implemented in `fakeTx.cpp`/`fakeTx.h`, wired into the receiver behind
+`--fake-tx`. A listener thread binds/listens on `SOCKNAME` and spawns a detached
+handler thread per connection (multithreaded, mirrors a real concurrent server).
+Each handler reads the `FT8Msg`, and for `SEND_F8_REQ` parses
+`"FT8Tx <freq|band> <dest> <src> <msg...>"` (band table like `ft8`), applies
+Option 3 (`fakeIsBandBase` + `FAKETX_AUDIO_MIN/MAX` 300..2800), replies
+`SEND_ACK` then `CHANGE_RTX_STATE "FREQ <absHz>"`, and logs to `faketx.log`.
+`--fake-tx` also forces `noreport`. Verified end-to-end on x86: CQ on a band base
+-> fake chooses an audio slot; a frequency inside the band -> transmitted
+verbatim; a band name -> resolved then chosen. Builds clean (x86 `-Wall
+-Wextra`; `fakeTx.cpp` ARM syntax-check clean).
+
+**Phase 2 -- render own transmission into the RX slot**
+- [ ] Shared `pendingTx` structure (message text + audio Hz + valid flag),
+      mutex-guarded; fakeTx thread fills it, slot loop consumes it.
+- [ ] Extend `fillRxTestBuffer` (or a sibling used when `--fake-tx`) to render
+      the pending own-TX message via `genFT8Signal` at its audio offset, instead
+      of / in addition to the A1TEST filler.
+- [ ] Confirm the RX decodes and displays/logs its own "transmitted" message at
+      the frequency the fake chose (closes the self-transmit hear-back check on
+      x86).
+- Risk to handle: slot-phase agreement is now trivial (single process, shared
+  slot clock) -- the fake just deposits into `pendingTx`; the slot loop reads it
+  at the fill point. Guard with the mutex; stale/duplicate deposits must be
+  cleared once consumed.
+
+**Phase 3 -- auto-reply QSO loop**
+- [ ] Give the fake a small station identity (callsign/grid) and minimal QSO
+      logic: when the RX transmits a CQ, on the NEXT slot render a synthetic
+      reply (`<theircall> <fakecall> <grid>`), then progress through the
+      exchange (reply -> RR73 -> 73) reacting to what the RX sends.
+- [ ] Drive the RX `qsoHandler` state machine end-to-end and confirm a complete
+      logged QSO (ADI entry) with correct frequencies.
+- Risk to handle: reply realism -- messages must encode (valid callsign/grid)
+  and land at an audio slot inside the passband.
+
+### Superseded risks
+
+The earlier "file handoff race" and "file phase agreement" risks are DROPPED:
+there is no `.iq` file. IQ is generated in-process on the slot-loop thread from a
+mutex-guarded in-memory hand-off. Remaining risks: thread lifecycle/guarding,
+reply realism (Phase 3), sample-rate coupling (genFT8Signal already uses the
+RX's SIGNAL_SAMPLE_RATE, so wide/narrow both work for free).
 
 Status: PLANNED, not implemented.

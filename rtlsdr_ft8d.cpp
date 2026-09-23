@@ -53,6 +53,8 @@
 
 #include <tsqueue.h>
 
+#include "fakeTx.h"
+
 /* Defines for debug */
 // #define TXWINTEST
 
@@ -440,6 +442,7 @@ void initrx_options() {
     rx_options.isHF = false;
     rx_options.directset = false;
     rx_options.rxtest = false;
+    rx_options.faketx = false;
     rx_options.rtlgen = rtlAuto;
 }
 
@@ -1685,6 +1688,7 @@ void usage(FILE *stream, int32_t status) {
             "\t-x do not report any spots on web clusters (WSPRnet, PSKreporter...)\n"
             "\t-t decoder self-test (generate a signal & decode), no parameter\n"
             "\t--rx-test synthetic RX source: generate ~3 FT8 msgs/sec (A1TEST...) with no RTL device\n"
+            "\t--fake-tx spawn a hardware-free fake ft8 transmitter (testing; no Pi hardware)\n"
             "\t-w write received signal and exit [filename prefix]\n"
             "\t-r read signal with .iq or .c2 format, decode and exit [filename]\n"
             "\t   (raw format: 375sps, float 32 bits, 2 channels)\n"
@@ -1706,6 +1710,7 @@ int main(int argc, char **argv) {
         {"rtl3", no_argument, 0, 0},
         {"rtl4", no_argument, 0, 0},
         {"rx-test", no_argument, 0, 0},
+        {"fake-tx", no_argument, 0, 0},
         {0, 0, 0, 0}};
 
     initrx_options();
@@ -1740,6 +1745,12 @@ int main(int argc, char **argv) {
                         rx_options.rxtest = true;
                         /* Never report synthetic (fake A1TEST...) traffic to
                            the live PSKReporter database. Force reporting off. */
+                        rx_options.noreport = true;
+                        break;
+                    case 5:  // --fake-tx : hardware-free fake ft8 transmitter (testing)
+                        rx_options.faketx = true;
+                        /* A test transmitter must never report to the live
+                           database either. */
                         rx_options.noreport = true;
                         break;
                 }
@@ -2019,6 +2030,18 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&decThread.ready_mutex, NULL);
     if (!rx_options.rxtest)
         pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+
+    /* Testing: start the hardware-free fake ft8 transmitter listener BEFORE the
+       TX client thread, so the socket is ready when the receiver first
+       transmits. Guarded by --fake-tx; absent from normal operation. */
+    if (rx_options.faketx) {
+        if (fakeTxStart() == 0)
+            wprintw(trafficW, "fake-tx: hardware-free transmitter active (no Pi hardware)\n");
+        else
+            wprintw(trafficW, "fake-tx: FAILED to start fake transmitter\n");
+        wrefresh(trafficW);
+    }
+
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
     pthread_create(&pskThread, NULL, pskUploader, NULL);
     pthread_create(&CQHThread, NULL, CQHandler, NULL);
@@ -2177,6 +2200,11 @@ int main(int argc, char **argv) {
     /* Destroy TXThread */
     close_TxThread();
     pthread_join(TXHThread, NULL);
+
+    /* Stop the hardware-free fake transmitter (if it was started). Done after
+       the TX client thread is joined so no new connections arrive. */
+    if (rx_options.faketx)
+        fakeTxStop();
 
     /* Destroy Keyboard Handling thread */
     close_KbhThread();
