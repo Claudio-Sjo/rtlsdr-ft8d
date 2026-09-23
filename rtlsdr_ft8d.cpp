@@ -1551,6 +1551,35 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                     /* Feed the QSO Handler machine */
                     tsq_push(qsoh_queue, &QSOHlock, qsoMsg);
+                } else {
+                    /* Not a CQ and not addressed to us. If a QSO is in progress
+                       and this decode falls on the peer's QSO frequency (within
+                       +/-50 Hz, the FT8 signal footprint) AND in the peer's slot
+                       (ODD/EVEN), attach it to the QSO for DISPLAY/LOGGING ONLY
+                       -- e.g. a peer's free-text "TNX 73 GL". It is pushed to the
+                       display queue (qso_queue), never to the state-machine queue
+                       (qsoh_queue), so it can never alter the token-driven QSO
+                       state. Both frequency and slot must match: a station on the
+                       same frequency but in the wrong slot is not our peer. */
+                    int32_t absFreq = (int32_t)freq_hz + dec_options.freq;
+                    int32_t qsoFreq = getActiveQsoFreq();
+                    if (qsoInProgress() && qsoFreq != 0 &&
+                        labs((long)absFreq - (long)qsoFreq) <= 50 &&
+                        thisSlot == getActiveQsoPeerSlot()) {
+                        struct plain_message infoMsg;
+                        /* Use the pristine decoded text (msgToLog) as the peer
+                           message; src = the QSO peer so it renders green in the
+                           "Ongoing QSO" window. */
+                        snprintf(infoMsg.src, sizeof(infoMsg.src), "%s", getActiveQsoPeer());
+                        snprintf(infoMsg.dest, sizeof(infoMsg.dest), "%s", dec_options.rcall);
+                        snprintf(infoMsg.loc, sizeof(infoMsg.loc), "%s", "");
+                        snprintf(infoMsg.message, sizeof(infoMsg.message), "%s", msgToLog);
+                        infoMsg.freq = absFreq;
+                        infoMsg.snr = estSnr;
+                        infoMsg.ft8slot = thisSlot;
+                        infoMsg.tempus = current_time;
+                        tsq_push(qso_queue, &QSOlock, infoMsg);
+                    }
                 }
             }
             // In any case we will log the message

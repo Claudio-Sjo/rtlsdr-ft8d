@@ -259,3 +259,181 @@ reply realism (Phase 3), sample-rate coupling (genFT8Signal already uses the
 RX's SIGNAL_SAMPLE_RATE, so wide/narrow both work for free).
 
 Status: PLANNED, not implemented.
+
+
+
+---
+
+## Plan: harden the QSO responder / message parser
+
+Investigation (post Phase 3) found the auto-QSO logic handles only the common
+standard-QSO subset of WSJT-X message formats, and -- worse -- misclassifies
+anything it does not recognise instead of ignoring it. ft8_lib decodes the full
+message-type space to text; the limitation is in the thin QSO-classification
+layer, not the decoder.
+
+### Two parsing layers
+
+1. Decode splitter -- `decode()` in rtlsdr_ft8d.cpp (~1470): splits a decoded
+   message into `dest src third-token`; feeds the QSO machine only if
+   `dest == mycall` (or it is a `CQ`).
+2. Classifier -- `parseMsg()` in qsoHandler.cpp (~551): classifies the THIRD
+   token into cqMsg/locMsg/sigMsg/RR73Msg/s73Msg. Rules today:
+   - digit / `+` / `-`, or 4-char `R+`/`R-`  -> sigMsg (`73` -> s73Msg)
+   - exactly `RR73`                          -> RR73Msg
+   - 4-char alphanumeric                     -> locMsg (assumed grid)
+   - EVERYTHING ELSE                         -> locMsg  (catch-all default)
+
+### Formats NOT handled correctly (measured/derived)
+
+- Free-text messages (`TNX 73`, `GL DX`, `5W ANT`): no dest/src structure; the
+  splitter mis-tokenises them and the third token defaults to locMsg.
+- `RRR` (older roger, still emitted; the encoder supports it): parseMsg checks
+  only `RR73`, so `RRR` falls through to the locMsg default -> misread as grid.
+- Compound `RR73;`-style (DXpedition/contesting, e.g.
+  `K1ABC RR73; CQ W9XYZ EN37`): the `;` compound is not parsed.
+- Non-standard / compound calls (`PJ4/KA1ABC`, `<WA9XYZ>`): a `/P` or `/R`
+  suffix on our own call, or a hashed peer, can defeat the `dest == mycall`
+  match so the QSO never starts.
+- Contest exchanges (EU VHF, ARRL FD/RTTY, WWROF): serial/section/R-report in
+  positions the 3-token model does not expect. Decode to text fine; the QSO
+  machine cannot interpret them. (Auto-QSO in a contest is likely out of scope,
+  but they must at least be ignored safely.)
+- THE CORE HAZARD: the locMsg catch-all means unknown content is not rejected --
+  it is silently treated as a locator, which can push the state machine the
+  wrong way rather than being safely ignored.
+
+### Proposed work (phased, use the fake_ft8 harness to measure then fix)
+
+- [ ] Step 1 -- Measure. Extend the fake responder (fakeTx.cpp) with an
+      "edge-case" mode that emits: free text, `RRR`, a `/P` suffixed call, a
+      hashed `<call>`, and one contest exchange. Run the loop and record how the
+      RX state machine reacts (baseline evidence, no fix yet).
+- [ ] Step 2 -- Add an explicit "unknown -> ignore" outcome. Introduce a
+      `noneMsg`/`unknownMsg` value in `peermsg_t` (qsoHandler.h) and make
+      `parseMsg` return it for anything it does not positively recognise, instead
+      of defaulting to locMsg. `addQso` then ignores unknowns (no state change),
+      which is the safe behaviour.
+- [ ] Step 3 -- Recognise the missing standard tokens. Add `RRR` (treat like
+      RR73 for our purposes, or as an ack that advances to reply73/RR73 per the
+      state table), and tighten the grid test (validate a real 4-char Maidenhead
+      locator: letter letter digit digit) so non-grids are not taken as grids.
+- [ ] Step 4 -- Robust tokenising / call matching. Handle `dest == mycall` when
+      our call carries a `/P` or `/R` suffix, and skip/flag free-text and
+      compound (`;`) forms up front so they never reach the report/grid logic.
+- [ ] Step 5 -- Decide contest-format policy: at minimum ignore them safely;
+      optionally log them for the operator. Do NOT attempt auto-QSO in contest
+      formats unless explicitly wanted.
+- [ ] Step 6 -- Re-run the harness (Step 1 emissions) to confirm each edge case
+      is now either handled or safely ignored, and that the standard QSO still
+      completes. Update this document and CHANGELOG.
+
+Note: Steps 2-5 modify the RX QSO logic (qsoHandler.cpp / .h), which is product
+behaviour independent of the test harness; the harness (Step 1/6) is how we get
+evidence before and after. Keep the fake edge-case emissions behind the existing
+--fake-tx test path so production is unaffected.
+
+Status: PLANNED, not implemented.
+
+
+
+---
+
+## Step 1 results -- measured responder behaviour (baseline, no fixes)
+
+Added an edge-case emission mode to the fake responder: with `FAKETX_EDGE=1`
+set (behind `--fake-tx`), `fakeEdgeMessage()` replies to the receiver's CQ /
+transmissions with a cycling series of non-standard WSJT-X forms, each addressed
+to the RX callsign, so the RX parser / QSO state machine can be observed.
+
+Method: driven via tmux with AUTOCQ + AUTOREPLY + AUTOQSO enabled; evidence taken
+from the RX's OWN transmissions (`faketx.log`) and the FT8 Traffic window pane.
+(The `LOG()` debug goes to stderr, which ncurses swallows -- the RX's resulting
+transmissions are the reliable indicator of its internal state.)
+
+Emitted form -> how it decoded -> how the RX reacted:
+
+| Emitted (peer -> RX) | RX decoded it as | RX reaction | Verdict |
+| -------------------- | ---------------- | ----------- | ------- |
+| `SA0PRF F1ABC RRR` | `SA0PRF F1ABC RRR` | replied `+17` (report) | MISCLASSIFIED: `RRR` hit the locMsg catch-all; treated like a locator/report instead of a roger. QSO did not close. |
+| `SA0PRF F1ABC/P JN99` | `SA0PRF F1ABC/P JN99` (/P kept) | kept resending `+17` | Peer call carries `/P`; exchange did not progress cleanly. |
+| `SA0PRF <F1ABC> RR73` | (hashed/bracketed) | kept resending `+17` | Hashed peer call not matched to the ongoing QSO peer; no advance. |
+| `TNX 73 GL` (free text) | not routed to QSO machine | ignored | SAFE by accident: no `dest` match, so it never reached the QSO logic. |
+| `SA0PRF F1ABC R 579 MA` (ARRL RTTY) | `SA0PRF F1ABC R+00` (!) | -- | DECODE-LEVEL MANGLING: ft8_lib rendered the contest exchange as a bogus `R+00` report. |
+| `SA0PRF F1ABC 559 0013` (serial) | `SA0PRF F1ABC R` (!) | -- | DECODE-LEVEL MANGLING: contest serial form rendered as a stray `R`. |
+
+Key takeaways (confirmed with evidence):
+1. The `locMsg` catch-all is a real hazard: `RRR` (and anything unrecognised) is
+   silently taken as a locator, pushing the state machine the wrong way rather
+   than being ignored. This is the highest-value thing to fix (planned Step 2).
+2. `RRR` is a legitimate roger the parser does not know (only `RR73`). Planned
+   Step 3.
+3. `/P` suffixed and `<hashed>` peer calls break the "same peer" match so an
+   in-progress QSO does not advance. Planned Step 4.
+4. Free text happens to be safe today only because it lacks a `dest` match --
+   not by design. Worth an explicit ignore path.
+5. Contest / RTTY forms are MANGLED by the decoder itself into bogus standard
+   messages -- a subtlety beyond the QSO layer. At minimum the QSO machine must
+   not act on such garbage (Step 2 fail-safe covers this); fully distinguishing
+   contest formats would require decode-type awareness (out of scope for now,
+   note for Step 5).
+
+Net: the RX did not cleanly handle ANY of the non-standard forms; the standard
+QSO (measured in Phase 3) remains the only fully-supported exchange. This
+baseline is what Steps 2-5 must improve, re-measured with the same harness.
+
+Status: Step 1 DONE (measurement). Steps 2-6 PLANNED.
+
+
+
+---
+
+## Free-text attribution to a QSO (by frequency + slot) -- DONE
+
+Requirement: attach a peer's free-text (and other not-addressed-to-us) messages
+to the in-progress QSO for DISPLAY/LOGGING ONLY; the QSO state machine stays
+driven purely by structured FT8 tokens.
+
+Confirmed premise: within a QSO both stations hold one frequency (WSJT-X default
+"Hold Tx Freq" behaviour; drift is a few Hz on HF). Tolerance chosen: +/-50 Hz
+(the FT8 signal footprint). It also requires the correct SLOT (ODD/EVEN) -- a
+station on the same frequency in the wrong slot is not our peer.
+
+Implementation:
+- qsoHandler: `qsoInProgress()`, `getActiveQsoFreq()`, `getActiveQsoPeer()`,
+  `getActiveQsoPeerSlot()` (peer slot from `currentQSO.ft8slot`).
+- decode(): for a message that is neither CQ nor addressed to us, if a QSO is in
+  progress and `|absFreq - qsoFreq| <= 50` AND `thisSlot == peerSlot`, push it to
+  the DISPLAY queue (`qso_queue`) only -- never the state-machine queue
+  (`qsoh_queue`) -- so it can never change state. Uses the pristine decoded text.
+- fakeTx: peer now holds ONE frequency per QSO (chosen once, reset on a fresh
+  CQ), which also made the QSO more realistic. Test hooks: `FAKETX_FREETEXT`
+  (peer sends `TNX 73 GL` on its frequency) and `FAKETX_EDGE` (edge-case series).
+
+Verified via tmux (AUTOCQ+AUTOREPLY+AUTOQSO): the peer's `TNX 73 GL` decoded in
+the Traffic window AND was attributed to the QSO in the Ongoing-QSO window
+(matched by freq+slot), while the RX's own transmissions stayed token-driven
+(kept sending its report) -- i.e. free text did NOT alter QSO state. Exactly the
+intended display/log-only behaviour.
+
+### ft8_lib free-text ENCODER added (in-tree hack)
+
+Found that the vendored ft8_lib had NO free-text encoder (`ftx_message_encode`
+tried only std + nonstd), so the harness could not synthesize free text. Since
+`libft8/` is our frozen in-tree copy, added `ftx_message_encode_free()` in
+`libft8/ft8/message.c` (inverse of `ftx_message_decode_free`: pack up to 13
+chars as a 71-bit base-42 value, i3=0/n3=0), and wired it as the fallback in
+`ftx_message_encode`. Round-trip verified: `TNX 73 GL`, `GL DX 73`, `73 GL`
+encode+decode MATCH; standard messages unaffected.
+
+### Repo bug fixed: libft8/ft8/ was not tracked by git
+
+While committing, found the `.gitignore` rule `ft8` (meant for the root `ft8`
+transmitter binary) ALSO matched the `libft8/ft8/` directory, so the ENTIRE FT8
+codec (constants/crc/decode/encode/ldpc/message/text .c/.h) was excluded from
+git -- a fresh clone would not build. Fixed by anchoring the binary-ignore
+patterns to the repo root (`/ft8`, `/client`, `/rtlsdr_ft8d`, `/mktestiq`,
+`/sk150lm_beacon`, `/calibrate`). The 15 `libft8/ft8/` source files are now
+tracked (`.o` still ignored via `*.o`).
+
+Status: DONE (feature + free-text encoder + gitignore fix), verified on x86.

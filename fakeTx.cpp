@@ -127,6 +127,40 @@ bool fakeTxPopPeer(char *msg, int msgCap, float *audioHz) {
 #define FAKE_PEER_RREPORT "R-10"
 #define FAKE_PEER_AUDIO_DELTA 250.0f /* peer sits this far from the RX's own slot */
 
+/* Edge-case measurement mode (responder hardening, Step 1). When the
+ * environment variable FAKETX_EDGE is set, the responder replies to the
+ * receiver's CQ with a cycling series of NON-standard WSJT-X message formats
+ * instead of the normal grid answer, so we can observe how the RX parser /
+ * QSO state machine reacts to each. Addressed to the RX callsign captured from
+ * its CQ. Behind the --fake-tx test path; production is unaffected. */
+static bool fakeEdgeMode = false;
+static int fakeEdgeIdx = 0;
+static bool fakeFreeTextMode = false; /* FAKETX_FREETEXT: peer sends free text */
+/* The peer holds one audio frequency per QSO (0 = not yet chosen). Reset when a
+   fresh CQ is seen so each QSO gets its own stable frequency. */
+static float fakePeerAudio = 0.0f;
+
+/* Build the next edge-case peer message addressed to rxcall. Returns false when
+ * the series is exhausted (so the caller can fall back to normal behaviour). */
+static bool fakeEdgeMessage(const char *rxcall, char *out, int outCap) {
+    /* Each entry is a message the RX might hear on the air but that the current
+     * parser does not handle as a clean std-QSO token. %s = rxcall. */
+    static const char *forms[] = {
+        "%s F1ABC RRR",          /* older roger: parser only knows RR73        */
+        "%s F1ABC/P JN99",       /* peer with /P suffix (nonstd call)          */
+        "%s <F1ABC> RR73",       /* hashed/bracketed peer call                 */
+        "TNX 73 GL",             /* free text (no dest/src structure)          */
+        "%s F1ABC R 579 MA",     /* ARRL-RTTY-style contest exchange           */
+        "%s F1ABC 559 0013",     /* generic serial/report contest form         */
+    };
+    const int n = (int)(sizeof(forms) / sizeof(forms[0]));
+    if (fakeEdgeIdx >= n)
+        return false;
+    snprintf(out, outCap, forms[fakeEdgeIdx], rxcall);
+    fakeEdgeIdx++;
+    return true;
+}
+
 /* Given the FT8 message the receiver just transmitted (tok0 tok1 tok2...),
  * produce the peer's next reply addressed to the RX, or return false if no
  * reply is warranted. rxAudio is the RX's own audio slot; the peer reply is
@@ -144,7 +178,13 @@ static bool fakePeerReply(char *tok0, char *tok1, char *tok2,
         return false;
 
     if (!strcmp(tok0, "CQ") && tok1) {
-        /* tok1 = rxcall (tok2 = rxgrid, ignored). Answer with our grid. */
+        /* A fresh CQ starts a new QSO: forget the previous peer frequency so a
+           new one is chosen for this QSO. */
+        fakePeerAudio = 0.0f;
+        /* tok1 = rxcall (tok2 = rxgrid, ignored). In edge-case measurement mode
+           reply with the next non-standard form; otherwise answer with grid. */
+        if (fakeEdgeMode && fakeEdgeMessage(tok1, out, outCap))
+            return true;
         snprintf(out, outCap, "%s %s %s", tok1, FAKE_PEER_CALL, FAKE_PEER_GRID);
         return true;
     }
@@ -153,6 +193,19 @@ static bool fakePeerReply(char *tok0, char *tok1, char *tok2,
        reply if it is addressed to us (the peer). */
     if (!strcmp(tok0, FAKE_PEER_CALL) && tok1 && tok2) {
         const char *rxcall = tok1;
+        /* Edge-case measurement: keep feeding non-standard forms so the series
+           advances on every RX transmission, even mid-exchange. */
+        if (fakeEdgeMode && fakeEdgeMessage(rxcall, out, outCap))
+            return true;
+        /* Free-text test hook: once the QSO is under way, reply with plain free
+           text (no dest/src) on the peer's frequency, to exercise the receiver's
+           frequency+slot attribution of free text to the QSO. */
+        if (fakeFreeTextMode) {
+            /* Free text on the peer's frequency, to exercise the receiver's
+               frequency+slot attribution of free text to the QSO. */
+            snprintf(out, outCap, "TNX 73 GL");
+            return true;
+        }
         if (!strcmp(tok2, "RR73")) {
             snprintf(out, outCap, "%s %s 73", rxcall, FAKE_PEER_CALL);
             return true;
@@ -294,16 +347,23 @@ static void *fakeHandler(void *argp) {
                                           tk1[0] ? tk1 : NULL,
                                           tk2[0] ? tk2 : NULL,
                                           peerMsg, sizeof(peerMsg))) {
-                            /* Place the peer a little away from the RX's own
-                               slot, clamped inside the usable passband. */
-                            float peerAudio = ownAudio + FAKE_PEER_AUDIO_DELTA;
+                            /* The peer keeps ONE frequency for the whole QSO
+                               (like a real station). It is chosen once, a little
+                               away from where the RX first called, and then
+                               reused -- so free text / reports from the peer all
+                               land on the same frequency the RX records as the
+                               QSO frequency. */
                             float nyq = (float)SIGNAL_SAMPLE_RATE / 2.0f;
-                            if (peerAudio >= nyq - 100.0f)
-                                peerAudio = ownAudio - FAKE_PEER_AUDIO_DELTA;
-                            if (peerAudio < 100.0f)
-                                peerAudio = 100.0f;
-                            depositSig(&fakePeer, peerMsg, peerAudio);
-                            fakeLog("  peer reply: \"%s\" @ %.0f Hz\n", peerMsg, peerAudio);
+                            if (fakePeerAudio <= 0.0f) {
+                                float a = ownAudio + FAKE_PEER_AUDIO_DELTA;
+                                if (a >= nyq - 100.0f)
+                                    a = ownAudio - FAKE_PEER_AUDIO_DELTA;
+                                if (a < 100.0f)
+                                    a = 100.0f;
+                                fakePeerAudio = a;
+                            }
+                            depositSig(&fakePeer, peerMsg, fakePeerAudio);
+                            fakeLog("  peer reply: \"%s\" @ %.0f Hz\n", peerMsg, fakePeerAudio);
                         }
                     }
                 }
@@ -442,6 +502,9 @@ int fakeTxStart(unsigned int dialHz) {
     if (fakeTxRunning)
         return 0;
     fakeDialHz = dialHz;
+    fakeEdgeMode = (getenv("FAKETX_EDGE") != NULL);
+    fakeEdgeIdx = 0;
+    fakeFreeTextMode = (getenv("FAKETX_FREETEXT") != NULL);
     fakeTxStopFlag = false;
     if (pthread_create(&fakeTxThread, NULL, fakeListener, NULL) != 0) {
         perror("fakeTx: pthread_create listener");

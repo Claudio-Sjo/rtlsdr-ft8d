@@ -64,3 +64,14 @@ bool getAutoQSOStatus(void);
 void setActiveSlot(ft8slot_t value);
 ft8slot_t getActiveSlot(void);
 void *QSOHandler(void *vargp);
+
+/* True when a QSO exchange is currently in progress (not idle). */
+bool qsoInProgress(void);
+/* Absolute RF (Hz) of the peer in the current QSO (0 if none). Used by the
+   decoder to attach frequency-matched free text to the QSO for display. */
+int32_t getActiveQsoFreq(void);
+/* Callsign of the peer in the current QSO ("" if none). */
+const char *getActiveQsoPeer(void);
+/* Slot the QSO peer transmits in (from when the QSO was established). A message
+   attributed to the QSO must arrive in this slot as well as on-frequency. */
+ft8slot_t getActiveQsoPeerSlot(void);

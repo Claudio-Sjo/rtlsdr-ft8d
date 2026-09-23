@@ -754,6 +754,25 @@ ft8slot_t getActiveSlot(void) {
     return activeSlot;
 }
 
+bool qsoInProgress(void) {
+    return (qsoState != idle);
+}
+
+int32_t getActiveQsoFreq(void) {
+    return (qsoState != idle) ? currentQSO.freq : 0;
+}
+
+const char *getActiveQsoPeer(void) {
+    return (qsoState != idle) ? currentQSO.src : "";
+}
+
+/* Slot the QSO peer transmits in, as recorded when the QSO was established
+   (currentQSO.ft8slot). A message genuinely part of the QSO must arrive in this
+   slot. Only meaningful while a QSO is in progress. */
+ft8slot_t getActiveQsoPeerSlot(void) {
+    return currentQSO.ft8slot;
+}
+
 /* QSO Handler Thread */
 void *QSOHandler(void *vargp) {
     while (qsoExit.load() == false) {
