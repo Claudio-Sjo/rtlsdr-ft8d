@@ -53,6 +53,8 @@
 
 #include <tsqueue.h>
 
+#include "fakeTx.h"
+
 /* Defines for debug */
 // #define TXWINTEST
 
@@ -347,6 +349,54 @@ static void fillRxTestBuffer(uint32_t idx) {
     rot++;
 }
 
+/*
+ * Synthetic RX source used by --fake-tx (Phase 2 of the fake transmitter).
+ *
+ * Instead of the fixed A1TEST traffic, this renders whatever the fake ft8
+ * transmitter last accepted over the socket -- i.e. the receiver's OWN
+ * transmission -- back into the decode buffer, so the RX "hears" what it sent.
+ * The fake deposits {message, audio offset} via fakeTxPopPending(); if nothing
+ * is pending this slot the buffer is left as noise only. Real 15 s slot timing
+ * is preserved by the caller.
+ */
+static void fillFakeTxBuffer(uint32_t idx) {
+    float *iS = rx_state.iSamples[idx];
+    float *qS = rx_state.qSamples[idx];
+
+    /* Clear the whole window buffer, then lay a light noise floor. */
+    for (int i = 0; i < SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE; i++) {
+        iS[i] = 0.0f;
+        qS[i] = 0.0f;
+    }
+
+    char msg[MAXMSGSIZE];
+    float audioHz = 0.0f;
+
+    /* The peer replies in the OPPOSITE slot to the receiver's transmission, like
+       a real QSO. The fake deposits the peer reply while processing the RX's
+       transmission (this slot); we hold it and render it in the NEXT slot so the
+       receiver, which is listening then, can decode it. */
+    static char peerHeld[MAXMSGSIZE] = {0};
+    static float peerHeldAudio = 0.0f;
+    static bool peerHeldValid = false;
+
+    /* Render any peer reply held from the previous slot first. */
+    if (peerHeldValid) {
+        genFT8Signal(iS, qS, peerHeld, peerHeldAudio, 0.35f, 0.02f);
+        peerHeldValid = false;
+    }
+
+    /* Render the receiver's own transmission (local echo) if pending. */
+    if (fakeTxPopOwn(msg, sizeof(msg), &audioHz))
+        genFT8Signal(iS, qS, msg, audioHz, 0.5f, 0.02f);
+
+    /* Latch any new peer reply to be rendered in the next (opposite) slot. */
+    if (fakeTxPopPeer(peerHeld, sizeof(peerHeld), &peerHeldAudio))
+        peerHeldValid = true;
+
+    rx_state.iqIndex[idx] = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
+}
+
 /* Thread used for the decoder */
 static void *decoder(void *arg) {
     int32_t n_results = 0;
@@ -440,6 +490,7 @@ void initrx_options() {
     rx_options.isHF = false;
     rx_options.directset = false;
     rx_options.rxtest = false;
+    rx_options.faketx = false;
     rx_options.rtlgen = rtlAuto;
 }
 
@@ -962,14 +1013,20 @@ bool genFT8Signal(float *iSamples, float *qSamples, const char *message,
     uint8_t tones[FT8_NN];
     ft8_encode(msg.payload, tones);
 
-    const double df = 3200.0 / 512.0;  // tone spacing (6.25 Hz)
-    const double dt = 1.0 / 3200.0;    // sample period
+    /* Render at the receiver's actual baseband rate. FT8 tone spacing is fixed
+       at 6.25 Hz (K_FSK_DEV) and one symbol lasts FT8_SYMBOL_PERIOD (0.16 s),
+       so samples/symbol = SIGNAL_SAMPLE_RATE * 0.16 (512 @3200, 1024 @6400).
+       Using the compile-time rate keeps the self-test / rx-test / fake-tx
+       generators correct for both the narrow and wide builds. */
+    const double df = K_FSK_DEV;                              // 6.25 Hz tone spacing
+    const double dt = 1.0 / (double)SIGNAL_SAMPLE_RATE;       // sample period
+    const int spsym = (int)(SIGNAL_SAMPLE_RATE / K_FSK_DEV);  // samples per symbol
     double phi = 0.0;
 
     for (int i = 0; i < FT8_NN; i++) {
         double dphi = 2.0 * M_PI * dt * (audioFreq + ((double)tones[i] - 3.5) * df);
-        for (int j = 0; j < 512; j++) {
-            int index = 512 * i + j;
+        for (int j = 0; j < spsym; j++) {
+            int index = spsym * i + j;
             if (index >= SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE)
                 break;  // Never overflow the buffer
             iSamples[index] += amp * cos(phi) + whiteGaussianNoise(wgn);
@@ -1494,6 +1551,35 @@ void decode(const monitor_t *mon, struct tm *tm_slot_start, struct decoder_resul
 
                     /* Feed the QSO Handler machine */
                     tsq_push(qsoh_queue, &QSOHlock, qsoMsg);
+                } else {
+                    /* Not a CQ and not addressed to us. If a QSO is in progress
+                       and this decode falls on the peer's QSO frequency (within
+                       +/-50 Hz, the FT8 signal footprint) AND in the peer's slot
+                       (ODD/EVEN), attach it to the QSO for DISPLAY/LOGGING ONLY
+                       -- e.g. a peer's free-text "TNX 73 GL". It is pushed to the
+                       display queue (qso_queue), never to the state-machine queue
+                       (qsoh_queue), so it can never alter the token-driven QSO
+                       state. Both frequency and slot must match: a station on the
+                       same frequency but in the wrong slot is not our peer. */
+                    int32_t absFreq = (int32_t)freq_hz + dec_options.freq;
+                    int32_t qsoFreq = getActiveQsoFreq();
+                    if (qsoInProgress() && qsoFreq != 0 &&
+                        labs((long)absFreq - (long)qsoFreq) <= 50 &&
+                        thisSlot == getActiveQsoPeerSlot()) {
+                        struct plain_message infoMsg;
+                        /* Use the pristine decoded text (msgToLog) as the peer
+                           message; src = the QSO peer so it renders green in the
+                           "Ongoing QSO" window. */
+                        snprintf(infoMsg.src, sizeof(infoMsg.src), "%s", getActiveQsoPeer());
+                        snprintf(infoMsg.dest, sizeof(infoMsg.dest), "%s", dec_options.rcall);
+                        snprintf(infoMsg.loc, sizeof(infoMsg.loc), "%s", "");
+                        snprintf(infoMsg.message, sizeof(infoMsg.message), "%s", msgToLog);
+                        infoMsg.freq = absFreq;
+                        infoMsg.snr = estSnr;
+                        infoMsg.ft8slot = thisSlot;
+                        infoMsg.tempus = current_time;
+                        tsq_push(qso_queue, &QSOlock, infoMsg);
+                    }
                 }
             }
             // In any case we will log the message
@@ -1685,6 +1771,7 @@ void usage(FILE *stream, int32_t status) {
             "\t-x do not report any spots on web clusters (WSPRnet, PSKreporter...)\n"
             "\t-t decoder self-test (generate a signal & decode), no parameter\n"
             "\t--rx-test synthetic RX source: generate ~3 FT8 msgs/sec (A1TEST...) with no RTL device\n"
+            "\t--fake-tx spawn a hardware-free fake ft8 transmitter (testing; no Pi hardware)\n"
             "\t-w write received signal and exit [filename prefix]\n"
             "\t-r read signal with .iq or .c2 format, decode and exit [filename]\n"
             "\t   (raw format: 375sps, float 32 bits, 2 channels)\n"
@@ -1706,6 +1793,7 @@ int main(int argc, char **argv) {
         {"rtl3", no_argument, 0, 0},
         {"rtl4", no_argument, 0, 0},
         {"rx-test", no_argument, 0, 0},
+        {"fake-tx", no_argument, 0, 0},
         {0, 0, 0, 0}};
 
     initrx_options();
@@ -1740,6 +1828,12 @@ int main(int argc, char **argv) {
                         rx_options.rxtest = true;
                         /* Never report synthetic (fake A1TEST...) traffic to
                            the live PSKReporter database. Force reporting off. */
+                        rx_options.noreport = true;
+                        break;
+                    case 5:  // --fake-tx : hardware-free fake ft8 transmitter (testing)
+                        rx_options.faketx = true;
+                        /* A test transmitter must never report to the live
+                           database either. */
                         rx_options.noreport = true;
                         break;
                 }
@@ -1876,16 +1970,16 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Safety: in synthetic RX-test mode, never report to the live database.
-       Force reporting off and do not even construct the reporter. */
-    if (rx_options.rxtest)
+    /* Safety: in synthetic RX-test / fake-tx mode, never report to the live
+       database. Force reporting off and do not even construct the reporter. */
+    if (rx_options.rxtest || rx_options.faketx)
         rx_options.noreport = true;
 
     /* Always construct the reporter so that reporting can be toggled ON at
        runtime (via the "PSK ON" command) without dereferencing a NULL pointer.
        Whether spots are actually sent is gated by rx_options.noreport in the
        pskUploader thread. (Skipped entirely in rx-test mode.) */
-    if (!rx_options.rxtest) {
+    if (!rx_options.rxtest && !rx_options.faketx) {
         if (!rx_options.noreport) {
             wprintw(trafficW, "PSK Reporter Initialized!\n");
             wrefresh(trafficW);
@@ -1941,9 +2035,9 @@ int main(int argc, char **argv) {
     char rtlDevResult[96];
     bool rtlOk;
 
-    if (rx_options.rxtest) {
+    if (rx_options.rxtest || rx_options.faketx) {
         /* Synthetic RX source: no real device is opened */
-        snprintf(rtlDevResult, sizeof(rtlDevResult), "Synthetic RX-test source (no RTL device)");
+        snprintf(rtlDevResult, sizeof(rtlDevResult), "Synthetic RX source (no RTL device)");
         rtlOk = true;
     } else {
         rtlOk = startRtlDevice(rtlDevResult);
@@ -2017,8 +2111,20 @@ int main(int argc, char **argv) {
     */
     pthread_cond_init(&decThread.ready_cond, NULL);
     pthread_mutex_init(&decThread.ready_mutex, NULL);
-    if (!rx_options.rxtest)
+    if (!rx_options.rxtest && !rx_options.faketx)
         pthread_create(&rxThread, NULL, rtlsdr_rx, NULL);
+
+    /* Testing: start the hardware-free fake ft8 transmitter listener BEFORE the
+       TX client thread, so the socket is ready when the receiver first
+       transmits. Guarded by --fake-tx; absent from normal operation. */
+    if (rx_options.faketx) {
+        if (fakeTxStart(rx_options.dialfreq) == 0)
+            wprintw(trafficW, "fake-tx: hardware-free transmitter active (no Pi hardware)\n");
+        else
+            wprintw(trafficW, "fake-tx: FAILED to start fake transmitter\n");
+        wrefresh(trafficW);
+    }
+
     pthread_create(&decThread.thread, &decThread.attr, decoder, NULL);
     pthread_create(&pskThread, NULL, pskUploader, NULL);
     pthread_create(&CQHThread, NULL, CQHandler, NULL);
@@ -2037,7 +2143,7 @@ int main(int argc, char **argv) {
     time_t lastCbChange = time(NULL);
     int restartFailures = 0;
     while (!rx_state.exit_flag && !(rx_options.maxloop && (rx_options.nloop >= rx_options.maxloop))) {
-        if (rx_options.rxtest) {
+        if (rx_options.rxtest || rx_options.faketx) {
             /* Synthetic slot: honour the real 15 s FT8 timing. Wait until the
                transmission window would end (FT8_TXTIME), fill the current
                buffer with a whole window of synthetic traffic, then flip and
@@ -2050,8 +2156,13 @@ int main(int argc, char **argv) {
             if (uwait > ft8wait) {
                 usleep(ft8wait);
                 /* Fill the buffer the decoder will read (current bufferIndex),
-                   then flip so prevBuffer points back to it. */
-                fillRxTestBuffer(rx_state.bufferIndex);
+                   then flip so prevBuffer points back to it. rx-test lays down
+                   synthetic A1TEST traffic; fake-tx renders the receiver's own
+                   transmission (what the fake ft8 accepted this cycle). */
+                if (rx_options.faketx)
+                    fillFakeTxBuffer(rx_state.bufferIndex);
+                else
+                    fillRxTestBuffer(rx_state.bufferIndex);
                 rx_state.bufferIndex = (rx_state.bufferIndex + 1) % 2;
                 rx_state.iqIndex[rx_state.bufferIndex] = 0;
                 safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
@@ -2148,7 +2259,7 @@ int main(int argc, char **argv) {
     rx_state.exit_flag = true;
     safe_cond_signal(&decThread.ready_cond, &decThread.ready_mutex);
 
-    if (rx_options.rxtest) {
+    if (rx_options.rxtest || rx_options.faketx) {
         /* Synthetic source runs in the main loop; nothing to join */
     } else if (rtl_device) {
         /* Stop the RX and free the blocking function. If a failed restart
@@ -2177,6 +2288,11 @@ int main(int argc, char **argv) {
     /* Destroy TXThread */
     close_TxThread();
     pthread_join(TXHThread, NULL);
+
+    /* Stop the hardware-free fake transmitter (if it was started). Done after
+       the TX client thread is joined so no new connections arrive. */
+    if (rx_options.faketx)
+        fakeTxStop();
 
     /* Destroy Keyboard Handling thread */
     close_KbhThread();

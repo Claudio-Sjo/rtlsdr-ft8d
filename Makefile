@@ -50,9 +50,9 @@ endif
 # bumping RTLSDR_FT8D_VERSION in rtlsdr_ft8d.h -- forces the affected objects to
 # rebuild (a plain pattern rule has no header prerequisites, which previously
 # left the version string stale until a manual 'make clean').
-HEADERS = rtlsdr_ft8d.h qsoHandler.h ft8_ncurses.h pskreporter.hpp tsqueue.h txcal.h
+HEADERS = rtlsdr_ft8d.h qsoHandler.h ft8_ncurses.h pskreporter.hpp tsqueue.h txcal.h fakeTx.h
 
-OBJSFT8D = rtlsdr_ft8d.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/ldpc.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/decode.o libft8/common/monitor.o libft8/fft/kiss_fft.o libft8/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o
+OBJSFT8D = rtlsdr_ft8d.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/ldpc.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/decode.o libft8/common/monitor.o libft8/fft/kiss_fft.o libft8/fft/kiss_fftr.o pskreporter.o ft8_ncurses.o qsoHandler.o fakeTx.o
 OBJSFTX = ft8.o libft8/ft8/constants.o libft8/ft8/text.o libft8/ft8/ldpc.o libft8/ft8/crc.o libft8/ft8/message.o libft8/ft8/encode.o libft8/ft8/decode.o libft8/common/monitor.o libft8/fft/kiss_fft.o libft8/fft/kiss_fftr.o stoargc.o mailbox.o
 OBJCLI = client.o
 OBJSK  = sk150lm_beacon.o

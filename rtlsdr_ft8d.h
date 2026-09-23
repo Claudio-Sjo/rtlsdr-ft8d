@@ -178,6 +178,7 @@ struct receiver_options {
     bool isHF;         /* True when an HF band was selected (needs v3/v4 handling) */
     bool directset;    /* True when the user explicitly set -d (do not auto-override) */
     bool rxtest;       /* True: synthetic RX source, no real RTL device */
+    bool faketx;       /* True: spawn the hardware-free fake ft8 transmitter (testing) */
     rtl_gen_t rtlgen;  /* Forced RTL generation, or rtlAuto to detect */
     char *filename;
 };
