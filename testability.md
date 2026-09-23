@@ -92,11 +92,23 @@ below). No file, no file-handoff race.
   handshake, the parser, Option 3, the `FREQ` reply and `TXHandler` parsing on
   x86 -- the biggest currently-untestable surface.
 
-- **Phase 2 -- IQ generation + RX per-slot ingest.**
-  The fake synthesizes the transmitted message into an `.iq` for the slot; the
-  receiver ingests it per slot (extend the `fillRxTestBuffer` hook to read the
-  fake's file). Add the race-safe handoff (atomic rename + ready token). This
-  lets the RX decode what the fake "sent" and show/log it.
+**Phase 2 -- render own transmission into the RX slot -- DONE**
+Implemented: `fakeTx` deposits the accepted transmission (message text + audio
+offset = absFreq - dial) into a mutex-guarded `fakePending` structure, retrieved
+by `fakeTxPopPending()` (one-shot per slot). The receiver, under `--fake-tx`,
+drives the synthetic per-slot source (no real RTL) and renders the pending
+transmission via `genFT8Signal()` in `fillFakeTxBuffer()`, so the RX decodes and
+displays its own transmission at the frequency the fake chose. `--fake-tx` joins
+`--rx-test` as a synthetic source across the reporter/RTL/main-loop guards.
+Verified end-to-end on x86: a live `./rtlsdr_ft8d --fake-tx -f 20m -c SA0PRF -l
+JO99` plus an injected `FT8Tx 14074000 CQ SA0PRF JO99` -> the fake chose an audio
+slot, reported it back, and the RX decoded its own CQ the next slot.
+
+Bugfix found during Phase 2: `genFT8Signal()` hard-coded the 3200 sps / 512
+samples-per-symbol constants, so the self-test and rx-test generators produced
+wrong-rate signals on the wide (6400 sps) default build -- the self-test was
+FAILING. Fixed to derive from `SIGNAL_SAMPLE_RATE` / `K_FSK_DEV`; self-test now
+passes on both narrow and wide.
 
 - **Phase 3 -- Auto-reply QSO loop.**
   On a decoded CQ, the fake constructs a valid reply (`<mycall> <peercall>

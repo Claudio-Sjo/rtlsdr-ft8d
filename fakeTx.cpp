@@ -39,6 +39,7 @@
 #include <sys/stat.h>
 
 #include <ft8tx/FT8Types.h>
+#include <rtlsdr_ft8d.h>
 #include "fakeTx.h"
 
 /* ------------------------------------------------------------------------- */
@@ -70,10 +71,41 @@ static pthread_t fakeTxThread;
 static volatile bool fakeTxRunning = false;
 static volatile bool fakeTxStopFlag = false;
 static int fakeServerFd = -1;
+static unsigned int fakeDialHz = 0; /* RX dial, for absFreq -> audio offset */
 
 /* Count of live handler threads, so fakeTxStop() can wait for them to drain. */
 static int fakeHandlerCount = 0;
 static pthread_mutex_t fakeHandlerLock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Pending-transmission hand-off to the receiver's per-slot IQ generator. */
+static struct {
+    char msg[MAXMSGSIZE];
+    float audioHz;
+    bool valid;
+} fakePending;
+static pthread_mutex_t fakePendingLock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Deposit a transmission for the RX to render next slot (Phase 2). */
+static void fakeTxDeposit(const char *msg, float audioHz) {
+    pthread_mutex_lock(&fakePendingLock);
+    snprintf(fakePending.msg, sizeof(fakePending.msg), "%s", msg);
+    fakePending.audioHz = audioHz;
+    fakePending.valid = true;
+    pthread_mutex_unlock(&fakePendingLock);
+}
+
+bool fakeTxPopPending(char *msg, int msgCap, float *audioHz) {
+    bool had = false;
+    pthread_mutex_lock(&fakePendingLock);
+    if (fakePending.valid) {
+        snprintf(msg, msgCap, "%s", fakePending.msg);
+        *audioHz = fakePending.audioHz;
+        fakePending.valid = false;
+        had = true;
+    }
+    pthread_mutex_unlock(&fakePendingLock);
+    return had;
+}
 
 static void fakeLog(const char *fmt, ...) {
     /* Timestamped append to the log file; best-effort. */
@@ -175,6 +207,16 @@ static void *fakeHandler(void *argp) {
                 Txletter.RTXstate = true;
                 snprintf(Txletter.ft8Message, MAXMSGSIZE, "FREQ %ld", absFreq);
                 send(fd, &Txletter, sizeof(Txletter), 0);
+
+                /* Phase 2: hand the transmission to the receiver's per-slot IQ
+                   generator. The RX renders at an audio offset from its dial:
+                   audio = absFreq - dial. Only deposit if we have a message and
+                   the offset lands in a sane audio range. */
+                if (message[0] && fakeDialHz > 0) {
+                    float audio = (float)(absFreq - (long)fakeDialHz);
+                    if (audio > 0.0f && audio < (float)SIGNAL_SAMPLE_RATE / 2.0f)
+                        fakeTxDeposit(message, audio);
+                }
 
                 fakeLog("SEND_F8_REQ freq=%ld msg=\"%s\"\n", absFreq, message);
                 break;
@@ -306,9 +348,10 @@ static void *fakeListener(void *arg) {
 
 /* ------------------------------------------------------------------------- */
 
-int fakeTxStart(void) {
+int fakeTxStart(unsigned int dialHz) {
     if (fakeTxRunning)
         return 0;
+    fakeDialHz = dialHz;
     fakeTxStopFlag = false;
     if (pthread_create(&fakeTxThread, NULL, fakeListener, NULL) != 0) {
         perror("fakeTx: pthread_create listener");

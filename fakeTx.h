@@ -24,10 +24,22 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-/* Start the fake transmitter listener thread. Returns 0 on success. Safe to
-   call once at receiver start-up when --fake-tx is enabled. */
-int fakeTxStart(void);
+/* Start the fake transmitter listener thread. `dialHz` is the receiver's dial
+   frequency, used to convert an absolute transmit frequency into the audio
+   offset the RX baseband generator needs (audio = absFreq - dial). Returns 0 on
+   success. Call once at receiver start-up when --fake-tx is enabled. */
+int fakeTxStart(unsigned int dialHz);
 
 /* Request the listener (and any in-flight handler threads) to stop, then join.
    Idempotent; unlinks the socket. Call at receiver shutdown. */
 void fakeTxStop(void);
+
+/* Pending-transmission hand-off (Phase 2): when the fake transmitter accepts a
+   SEND_F8_REQ it deposits the FT8 message text and its audio offset (Hz,
+   relative to the dial) here. The receiver's per-slot generator pops it and
+   renders it into the decode buffer, so the RX "hears" its own transmission.
+
+   fakeTxPopPending() returns true and fills msg/audioHz if a transmission is
+   pending, clearing it (one-shot per slot). Thread-safe. `msgCap` is the size
+   of the caller's msg buffer. */
+bool fakeTxPopPending(char *msg, int msgCap, float *audioHz);
