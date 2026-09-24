@@ -15,3 +15,4 @@ ft8_lib/
 
 # Windows "mark of the web" NTFS alternate-data-stream artifacts
 *:Zone.Identifier
+faketx.log
