@@ -1,5 +1,45 @@
 ## CHANGELOG
 
+### 0.8.9
+
+- **Fixed: the FT8 codec sources were not tracked by git.** The `.gitignore`
+  rule `ft8` (intended for the root `ft8` transmitter binary) also matched the
+  `libft8/ft8/` directory, so the entire vendored codec
+  (constants/crc/decode/encode/ldpc/message/text `.c`/`.h`) was excluded and a
+  fresh clone would not build. Binary-ignore patterns are now anchored to the
+  repo root (`/ft8`, `/client`, `/rtlsdr_ft8d`, `/mktestiq`, `/sk150lm_beacon`,
+  `/calibrate`); the 15 `libft8/ft8/` sources are now tracked.
+- **Free-text messages received during a QSO are attached to it (display/log
+  only).** A decoded message that is neither a CQ nor addressed to us is shown
+  in the Ongoing-QSO window if it falls within +/-50 Hz of the peer's QSO
+  frequency AND in the peer's slot (ODD/EVEN). It is routed to the display queue
+  only, never to the QSO state machine, which stays driven purely by the
+  structured FT8 tokens.
+- **Added a free-text encoder to the in-tree ft8_lib.** Upstream ft8_lib had no
+  free-text encoder (`ftx_message_encode` tried only standard + nonstandard
+  calls). `ftx_message_encode_free()` was added to `libft8/ft8/message.c`
+  (inverse of the existing decoder: 13 chars, base-42, i3=0) and wired as the
+  fallback, so genuine free text now encodes. Round-trip verified.
+- **Fixed: `genFT8Signal()` hard-coded 3200 sps / 512 samples-per-symbol**,
+  producing wrong-rate signals on the wide (6400 sps) default build -- the
+  decoder self-test was failing. It now derives from `SIGNAL_SAMPLE_RATE` /
+  `K_FSK_DEV`; self-test passes on both narrow and wide builds.
+- **Fixed a QSO state-machine stall.** On receiving a signal report while
+  already in `replySig`, the machine re-set `replySig` (the advance-to-`replyRR73`
+  branch was commented out), so a QSO initiator resent its report forever and
+  never completed. It now advances `replySig -> replyRR73` on the acknowledging
+  report.
+- **Hardware-free test transmitter (`--fake-tx`).** A socket-compatible,
+  multithreaded stand-in for the `ft8` transmitter, spawned as a thread from the
+  receiver, that mimics the real daemon without any Raspberry Pi hardware:
+  parses transmit requests, applies the band-base/verbatim frequency rule,
+  reports the chosen frequency back, and (with the receiver's per-slot generator)
+  renders its transmissions -- and a synthetic peer reply -- so a full QSO can be
+  driven and observed on x86. Test hooks: `FAKETX_FREETEXT` and `FAKETX_EDGE`
+  environment variables, plus the `FT8D_BENCH` decode-timing hook. See
+  `testability.md`.
+- **New documentation:** `using.md` (build / run / GUI / testing guide).
+
 ### 0.8.8
 
 - **Transmit-frequency choice moved back to the transmitter (Option 3), with
