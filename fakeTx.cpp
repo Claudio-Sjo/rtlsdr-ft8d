@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
 #include <math.h>
 #include <wordexp.h>
 #include <pthread.h>
@@ -239,6 +240,35 @@ static void fakeLog(const char *fmt, ...) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* Slot-timing helpers, so the fake transmitter occupies the FT8 slot like a
+ * real station: align to the 15 s slot boundary, then hold for the ~12.6 s
+ * transmission. Both waits poll fakeTxStopFlag in small steps so shutdown is
+ * prompt and the handler never hangs past program exit. */
+
+/* Sleep `usec` microseconds, returning early (false) if a stop is requested. */
+static bool fakeInterruptibleSleep(long usec) {
+    const long step = 50000; /* 50 ms */
+    while (usec > 0 && !fakeTxStopFlag) {
+        long chunk = (usec < step) ? usec : step;
+        usleep((useconds_t)chunk);
+        usec -= chunk;
+    }
+    return !fakeTxStopFlag;
+}
+
+/* Wait until the start of the next 15 s FT8 slot boundary. Returns false if a
+   stop was requested while waiting. */
+static bool fakeWaitSlotBoundary(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long usecIntoPeriod = (long)(tv.tv_sec % FT8_PERIOD) * 1000000L + tv.tv_usec;
+    long toBoundary = (long)FT8_BUFRESET - usecIntoPeriod; /* FT8_BUFRESET = 15 s */
+    if (toBoundary < 0)
+        toBoundary = 0;
+    return fakeInterruptibleSleep(toBoundary);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Per-connection handler thread.
  *
  * Reads one FT8Msg, dispatches on type. For SEND_F8_REQ it parses the request
@@ -324,49 +354,75 @@ static void *fakeHandler(void *argp) {
                 snprintf(Txletter.ft8Message, MAXMSGSIZE, "SEND_F8_REQ");
                 send(fd, &Txletter, sizeof(Txletter), 0);
 
-                /* Reply 2: report the actual (possibly self-chosen) frequency,
-                   exactly as ft8's transmit loop now does (Option 3). */
-                Txletter.type = CHANGE_RTX_STATE;
-                Txletter.RTXstate = true;
-                snprintf(Txletter.ft8Message, MAXMSGSIZE, "FREQ %ld", absFreq);
-                send(fd, &Txletter, sizeof(Txletter), 0);
-
-                /* Phase 2/3: hand the transmission to the receiver's per-slot IQ
-                   generator. The RX renders at an audio offset from its dial:
-                   audio = absFreq - dial. Deposit the RX's own echo, and -- in
-                   QSO mode -- a synthetic peer reply addressed back to the RX so
-                   its state machine advances. */
+                /* Model the real transmitter's timing: the request was queued at
+                   ~12.6 s into the receiver's slot; the actual transmission
+                   waits for the next 15 s slot boundary and then occupies the
+                   whole ~12.6 s of that slot. Waiting here (in the per-connection
+                   handler thread, which is detached) keeps the listener
+                   responsive. Compute the peer reply / own-echo audio first so
+                   the deposits are ready to place at the right moments. */
+                float ownAudio = -1.0f;
+                bool haveOwn = false;
+                char peerMsg[MAXMSGSIZE] = {0};
+                bool havePeer = false;
                 if (message[0] && fakeDialHz > 0) {
-                    float ownAudio = (float)(absFreq - (long)fakeDialHz);
-                    if (ownAudio > 0.0f && ownAudio < (float)SIGNAL_SAMPLE_RATE / 2.0f) {
-                        depositSig(&fakeOwn, message, ownAudio);
-
-                        /* Compute the peer reply from the RX's message tokens. */
-                        char peerMsg[MAXMSGSIZE];
+                    float a = (float)(absFreq - (long)fakeDialHz);
+                    if (a > 0.0f && a < (float)SIGNAL_SAMPLE_RATE / 2.0f) {
+                        ownAudio = a;
+                        haveOwn = true;
                         if (fakePeerReply(tk0[0] ? tk0 : NULL,
                                           tk1[0] ? tk1 : NULL,
                                           tk2[0] ? tk2 : NULL,
                                           peerMsg, sizeof(peerMsg))) {
                             /* The peer keeps ONE frequency for the whole QSO
-                               (like a real station). It is chosen once, a little
-                               away from where the RX first called, and then
-                               reused -- so free text / reports from the peer all
-                               land on the same frequency the RX records as the
-                               QSO frequency. */
+                               (like a real station), chosen once and reused. */
                             float nyq = (float)SIGNAL_SAMPLE_RATE / 2.0f;
                             if (fakePeerAudio <= 0.0f) {
-                                float a = ownAudio + FAKE_PEER_AUDIO_DELTA;
-                                if (a >= nyq - 100.0f)
-                                    a = ownAudio - FAKE_PEER_AUDIO_DELTA;
-                                if (a < 100.0f)
-                                    a = 100.0f;
-                                fakePeerAudio = a;
+                                float pa = ownAudio + FAKE_PEER_AUDIO_DELTA;
+                                if (pa >= nyq - 100.0f)
+                                    pa = ownAudio - FAKE_PEER_AUDIO_DELTA;
+                                if (pa < 100.0f)
+                                    pa = 100.0f;
+                                fakePeerAudio = pa;
                             }
-                            depositSig(&fakePeer, peerMsg, fakePeerAudio);
-                            fakeLog("  peer reply: \"%s\" @ %.0f Hz\n", peerMsg, fakePeerAudio);
+                            havePeer = true;
                         }
                     }
                 }
+
+                /* Align to the next slot boundary (start of the TX slot). */
+                fakeWaitSlotBoundary();
+
+                /* Reply 2: report the actual (possibly self-chosen) frequency,
+                   exactly as ft8's transmit loop does (Option 3), at the moment
+                   transmission begins. */
+                Txletter.type = CHANGE_RTX_STATE;
+                Txletter.RTXstate = true;
+                snprintf(Txletter.ft8Message, MAXMSGSIZE, "FREQ %ld", absFreq);
+                send(fd, &Txletter, sizeof(Txletter), 0);
+
+                /* Deposit the receiver's OWN transmission at the start of the TX
+                   slot; the RX per-slot generator renders it in this slot. */
+                if (haveOwn)
+                    depositSig(&fakeOwn, message, ownAudio);
+
+                /* Occupy the slot for the transmission duration (~12.6 s). */
+                fakeInterruptibleSleep(FT8_TXTIME);
+
+                /* After our transmission ends, deposit the synthetic peer reply.
+                   Being deposited ~12.6 s into the TX slot, it is picked up by
+                   the next slot's fill and rendered in the OPPOSITE slot, like a
+                   real QSO reply. */
+                if (havePeer) {
+                    depositSig(&fakePeer, peerMsg, fakePeerAudio);
+                    fakeLog("  peer reply: \"%s\" @ %.0f Hz\n", peerMsg, fakePeerAudio);
+                }
+
+                /* Signal end of transmission. */
+                Txletter.type = CHANGE_RTX_STATE;
+                Txletter.RTXstate = false;
+                snprintf(Txletter.ft8Message, MAXMSGSIZE, "End of transmission");
+                send(fd, &Txletter, sizeof(Txletter), 0);
 
                 fakeLog("SEND_F8_REQ freq=%ld msg=\"%s\"\n", absFreq, message);
                 break;

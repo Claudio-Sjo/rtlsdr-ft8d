@@ -114,8 +114,9 @@ passes on both narrow and wide.
 The fake gained a fixed station identity (`F1ABC` / `JN99`) and a responder
 (`fakePeerReply`) that answers the receiver's QSO: CQ -> answer with grid;
 signal report -> R-report; RR73 -> 73; 73 -> done. Two pending slots (own echo +
-peer reply); the peer reply is rendered one slot LATER than the RX's own
-transmission, so it lands in the opposite slot like a real alternating QSO.
+peer reply); slot placement is driven by the fake transmitter's real-time
+timing (see "Transmission-time realism" below), so the peer reply lands in the
+opposite slot like a real alternating QSO.
 Verified live (driven via tmux with AUTOCQ + AUTOREPLY + AUTOQSO enabled): the
 receiver runs a complete exchange end to end -- `CQ SA0PRF JO99` -> peer
 `SA0PRF F1ABC JN99` -> `F1ABC SA0PRF +17` -> peer `SA0PRF F1ABC R-10` ->
@@ -437,3 +438,52 @@ patterns to the repo root (`/ft8`, `/client`, `/rtlsdr_ft8d`, `/mktestiq`,
 tracked (`.o` still ignored via `*.o`).
 
 Status: DONE (feature + free-text encoder + gitignore fix), verified on x86.
+
+
+
+---
+
+## Transmission-time realism (fake-tx 12.6 s occupancy) -- DONE
+
+Earlier the fake transmitter deposited its rendered signal instantly and slot
+placement came only from a one-slot delay in the RX render (`fillFakeTxBuffer`).
+That reproduced the slot ALTERNATION but not the real intra-slot timing (the
+12.6 s transmission occupancy and the ~2.4 s decode gap). The fake now models
+the real transmitter's timing so the simulation matches reality.
+
+New per-connection handler sequence (`fakeTx.cpp`, `--fake-tx` only):
+1. Send `SEND_ACK` immediately (as real `ft8`).
+2. Compute the own-echo audio and the peer reply.
+3. `fakeWaitSlotBoundary()` -- align to the next 15 s FT8 slot boundary (like the
+   real `ft8` `sleep(15 - sec)` / `wait_every_15_sec`).
+4. Send `FREQ <absHz>` (RTXstate=true) and deposit the receiver's OWN
+   transmission -> rendered in this (the TX) slot.
+5. `fakeInterruptibleSleep(FT8_TXTIME)` -- hold ~12.6 s, the transmission
+   occupancy.
+6. Deposit the synthetic PEER reply (now ~12.6 s into the slot) -> picked up by
+   the next slot's fill and rendered in the OPPOSITE slot. Send RTXstate=false
+   ("End of transmission").
+
+Both waits poll `fakeTxStopFlag` in 50 ms steps so shutdown stays prompt; the
+handler is a detached per-connection thread, so the listener keeps accepting.
+The RX-side one-slot `peerHeld` delay in `fillFakeTxBuffer` was REMOVED -- the
+handler's real-time deposits now provide slot placement (keeping it would push
+the peer an extra slot).
+
+Side benefit: because the receiver's `TXHandler` performs its three blocking
+reads across these waits, `txStatusFlag`/`setTransmitting()` now track the true
+transmission window -- the GUI `RTx` indicator shows `Tx` for the real ~12.6 s,
+not instantaneously.
+
+Verified live (tmux, AUTOCQ + AUTOREPLY + AUTOQSO): a full exchange completes at
+the realistic one-message-per-slot cadence, e.g. (timestamps 15 s apart, slots
+alternating): RX `CQ SA0PRF JO99` (ODD) -> peer `SA0PRF F1ABC JN99` (EVEN) ->
+RX `F1ABC SA0PRF +17` (ODD) -> peer `SA0PRF F1ABC R-10` (EVEN) ->
+RX `F1ABC SA0PRF RR73` (ODD) -> peer `SA0PRF F1ABC 73` (EVEN) -> new CQ. The peer
+holds one frequency per QSO. This matches the operator's model: CQ on ODD (12.6 s
+TX + 2.4 s decode gap), reply on EVEN, next reply on the following ODD.
+
+(Unchanged pre-existing item: when the RX is the CQ initiator and ends by
+sending RR73 then receiving the peer's `73`, the `s73Msg` path resets without
+`logToAdi`, so that role produces no ADIF record; the QSO itself completes
+correctly. Logging policy, not a timing issue.)

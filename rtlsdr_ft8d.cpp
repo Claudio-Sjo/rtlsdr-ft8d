@@ -372,27 +372,19 @@ static void fillFakeTxBuffer(uint32_t idx) {
     char msg[MAXMSGSIZE];
     float audioHz = 0.0f;
 
-    /* The peer replies in the OPPOSITE slot to the receiver's transmission, like
-       a real QSO. The fake deposits the peer reply while processing the RX's
-       transmission (this slot); we hold it and render it in the NEXT slot so the
-       receiver, which is listening then, can decode it. */
-    static char peerHeld[MAXMSGSIZE] = {0};
-    static float peerHeldAudio = 0.0f;
-    static bool peerHeldValid = false;
-
-    /* Render any peer reply held from the previous slot first. */
-    if (peerHeldValid) {
-        genFT8Signal(iS, qS, peerHeld, peerHeldAudio, 0.35f, 0.02f);
-        peerHeldValid = false;
-    }
+    /* Slot placement is now driven by the fake transmitter's real-time timing
+       (it aligns to the slot boundary and holds the ~12.6 s transmission before
+       depositing the peer reply), so this fill simply renders whatever is
+       pending: the receiver's own transmission and/or the peer's reply. */
 
     /* Render the receiver's own transmission (local echo) if pending. */
     if (fakeTxPopOwn(msg, sizeof(msg), &audioHz))
         genFT8Signal(iS, qS, msg, audioHz, 0.5f, 0.02f);
 
-    /* Latch any new peer reply to be rendered in the next (opposite) slot. */
-    if (fakeTxPopPeer(peerHeld, sizeof(peerHeld), &peerHeldAudio))
-        peerHeldValid = true;
+    /* Render the synthetic peer reply if pending (a bit weaker, like a real DX
+       station), at its own QSO frequency. */
+    if (fakeTxPopPeer(msg, sizeof(msg), &audioHz))
+        genFT8Signal(iS, qS, msg, audioHz, 0.35f, 0.02f);
 
     rx_state.iqIndex[idx] = SIGNAL_LENGHT * SIGNAL_SAMPLE_RATE;
 }
